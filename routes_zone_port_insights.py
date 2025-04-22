@@ -86,7 +86,8 @@ async def zone_port_traffic(
     offset: int = Query(0, ge=0, description="The number of records to skip. Works with limit."),
     timestamp_start: str = Query(None, description="The start date and time in UTC from which to get the vessels in the port."),
     timestamp_end: str = Query(None, description="The end date and time in UTC for which to get the vessels in the port."),
-    event_type: str = Query(None, description="Filter on specific zone or port events. If omitted, all events will be considered.")
+    event_type: str = Query(None, description="Filter on specific zone or port events. If omitted, all events will be considered."),
+    flatten_json: Optional[bool] = Query(False, description="If true, flatten all events and zone_port_information and return them as a flat list.")
 ):
     headers = dict(request.headers)
     headers.pop("host", None)
@@ -108,6 +109,24 @@ async def zone_port_traffic(
             resp = await client.get(url, headers=headers, params=params)
     except httpx.RequestError as e:
         return JSONResponse(status_code=HTTP_502_BAD_GATEWAY, content={"detail": str(e)})
+    # Only flatten on 200 and if flatten_json is true
+    if flatten_json and resp.status_code == 200:
+        try:
+            payload = resp.json()
+            if (
+                "data" in payload
+                and isinstance(payload["data"], dict)
+                and "events" in payload["data"]
+                and isinstance(payload["data"]["events"], list)
+            ):
+                zone_port_info = flatten_dict(payload["data"].get("zone_port_information", {}))
+                flat_events = [
+                    {**flatten_dict(event), **zone_port_info}
+                    for event in payload["data"]["events"]
+                ]
+                return JSONResponse(content=flat_events, status_code=200)
+        except Exception:
+            pass  # fallback to raw response
     return Response(
         content=resp.content,
         status_code=resp.status_code,
