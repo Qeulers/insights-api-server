@@ -27,7 +27,7 @@ async def vessel_characteristics(request: Request, imo: int, flatten_json: Optio
         return JSONResponse(status_code=401, content={"detail": "Missing Authorization header"})
     params = dict(request.query_params)
     params.pop("flatten_json", None)  # Don't forward our custom param
-    url = f"{EXTERNAL_BASE_URL}/vessel-characteristics/{imo}"
+    url = f"{EXTERNAL_BASE_URL}/v1/vessel-characteristics/{imo}"
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(url, headers=headers, params=params)
