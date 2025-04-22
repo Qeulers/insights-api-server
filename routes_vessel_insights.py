@@ -18,8 +18,8 @@ def flatten_dict(d, parent_key='', sep='_'):
 EXTERNAL_BASE_URL = "https://api.polestar-production.com/vessel-insights"
 router = APIRouter(prefix="/vessel-insights", tags=["Vessel Insights"])
 
-@router.get("/vessel-characteristics")
-async def vessel_characteristics(request: Request, imo: str = Query(...), flatten_json: Optional[bool] = False):
+@router.get("/vessel-characteristics/{imo}")
+async def vessel_characteristics(request: Request, imo: int, flatten_json: Optional[bool] = False):
     headers = dict(request.headers)
     headers.pop("host", None)
     # Only allow requests with Authorization header
@@ -27,8 +27,7 @@ async def vessel_characteristics(request: Request, imo: str = Query(...), flatte
         return JSONResponse(status_code=401, content={"detail": "Missing Authorization header"})
     params = dict(request.query_params)
     params.pop("flatten_json", None)  # Don't forward our custom param
-    params["imo"] = imo
-    url = f"{EXTERNAL_BASE_URL}/vessel-characteristics"
+    url = f"{EXTERNAL_BASE_URL}/vessel-characteristics/{imo}"
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(url, headers=headers, params=params)
