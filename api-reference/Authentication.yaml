@@ -1,0 +1,645 @@
+openapi: 3.1.0
+info:
+  version: '1.0'
+  title: Authentication
+  summary: Authenticate using JWT token
+  description: This API handles the JWT token generation by providing valid account credentials.
+  contact:
+    name: support
+    url: www.polestarglobal.com/support
+    email: support@polestarglobal.com
+servers:
+  - url: 'https://api.polestar-production.com'
+paths:
+  /account/v1/auth/signin:
+    post:
+      summary: Get Token
+      description: This API authenticates the user by providing their username and password credentials in the body of the request. If authentication completes successfully a JWT token and refresh token will be sent back in the response body and headers.
+      operationId: post-account-v1-auth-signin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SigninRequestSchema'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SigninResponseSchemaNew'
+          headers:
+            Access-Token:
+              schema:
+                type: string
+              description: JWT access token. Only when MFA is not enabled on the account.
+            Refresh-Token:
+              schema:
+                type: string
+              description: JWT refresh token. Only when MFA is not enabled on the account.
+            Session:
+              schema:
+                type: string
+              description: The session id. Only when MFA is enabled on the account.
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error_Response'
+              examples:
+                Example 1:
+                  value:
+                    code: 400
+                    message: Missing username or password
+                    request_uri: /v1/signin
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error_Response'
+              examples:
+                Example 1:
+                  value:
+                    code: 401
+                    message: Unauthorized user
+                    request_uri: /v1/signin
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error_Response'
+              examples:
+                Example 1:
+                  value:
+                    code: 404
+                    message: resource not found
+                    request_uri: /v1/signin
+        '422':
+          description: Unprocessable Entity (WebDAV)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error_Response'
+        '429':
+          description: Too Many Requests
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error_Response'
+              examples:
+                Example 1:
+                  value:
+                    code: 429
+                    message: Too many request
+                    request_uri: /v1/signin
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error_Response'
+              examples:
+                Example 1:
+                  value:
+                    code: 500
+                    message: Internal Server error. Please try again later
+                    request_uri: /v1/signin
+      servers:
+        - url: 'https://api.polestar-production.com'
+      x-internal: false
+  /account/v1/auth/access-token-refresh:
+    post:
+      summary: Refresh Token
+      description: Refresh the access token using the refresh token obtained during signin.
+      operationId: post-account-v1-auth-access-token-refresh
+      parameters:
+        - name: Refresh-token
+          in: header
+          description: The refresh token obtained during signin.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshTokenResponseSchemaNew'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error_Response'
+              examples:
+                Example 1:
+                  value:
+                    code: 400
+                    message: Missing username or password
+                    request_uri: /v1/signin
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error_Response'
+              examples:
+                Example 1:
+                  value:
+                    code: 401
+                    message: Unauthorized user
+                    request_uri: /v1/signin
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error_Response'
+              examples:
+                Example 1:
+                  value:
+                    code: 404
+                    message: resource not found
+                    request_uri: /v1/signin
+        '422':
+          description: Unprocessable Entity (WebDAV)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error_Response'
+        '429':
+          description: Too Many Requests
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error_Response'
+              examples:
+                Example 1:
+                  value:
+                    code: 429
+                    message: Too many request
+                    request_uri: /v1/signin
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error_Response'
+              examples:
+                Example 1:
+                  value:
+                    code: 500
+                    message: Internal Server error. Please try again later
+                    request_uri: /v1/signin
+          headers:
+            access-token:
+              schema:
+                type: string
+              description: The JWT access token
+            refresh-token:
+              schema:
+                type: string
+              description: The JWT refresh token
+      servers:
+        - url: 'https://api.polestar-production.com'
+      x-internal: false
+  /account/v1/auth/password-reset/otp:
+    post:
+      summary: Send Password Reset Email (One Time Passcode)
+      description: |-
+        Trigger a password reset email which will be sent to the email address provided in the request body (provided the user account exists).
+
+        The email will contain a One Time Passcode (OTP), which can be used to set a new password by calling the Reset User Password endpoint.
+      operationId: post-account-v1-auth-password-reset-otp
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendPasswordResetEmailRequestSchema'
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendPasswordResetEmailResponseSchema'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error_Response'
+              examples:
+                Example 1:
+                  value:
+                    code: 400
+                    message: Missing username or password
+                    request_uri: /v1/signin
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error_Response'
+              examples:
+                Example 1:
+                  value:
+                    code: 401
+                    message: Unauthorized user
+                    request_uri: /v1/signin
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error_Response'
+              examples:
+                Example 1:
+                  value:
+                    code: 404
+                    message: resource not found
+                    request_uri: /v1/signin
+        '422':
+          description: Unprocessable Entity (WebDAV)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error_Response'
+        '429':
+          description: Too Many Requests
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error_Response'
+              examples:
+                Example 1:
+                  value:
+                    code: 429
+                    message: Too many request
+                    request_uri: /v1/signin
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error_Response'
+              examples:
+                Example 1:
+                  value:
+                    code: 500
+                    message: Internal Server error. Please try again later
+                    request_uri: /v1/signin
+      servers:
+        - url: 'https://api.polestar-production.com'
+      x-internal: false
+  /account/v1/auth/password-reset:
+    post:
+      summary: Reset User Password
+      description: 'Set a new password for your user account by providing the One Time Passcode (OTP) obtained via the Send Password Reset Email endpoint, your registered email address and your new password.'
+      operationId: post-account-v1-auth-password-reset
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResetUserPasswordRequestSchema'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResetUserPasswordResponseSchema'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error_Response'
+              examples:
+                Example 1:
+                  value:
+                    code: 400
+                    message: Missing username or password
+                    request_uri: /v1/signin
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error_Response'
+              examples:
+                Example 1:
+                  value:
+                    code: 401
+                    message: Unauthorized user
+                    request_uri: /v1/signin
+        '404':
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error_Response'
+              examples:
+                Example 1:
+                  value:
+                    code: 404
+                    message: resource not found
+                    request_uri: /v1/signin
+        '422':
+          description: Unprocessable Entity (WebDAV)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error_Response'
+        '429':
+          description: Too Many Requests
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error_Response'
+              examples:
+                Example 1:
+                  value:
+                    code: 429
+                    message: Too many request
+                    request_uri: /v1/signin
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error_Response'
+              examples:
+                Example 1:
+                  value:
+                    code: 500
+                    message: Internal Server error. Please try again later
+                    request_uri: /v1/signin
+      servers:
+        - url: 'https://api.polestar-production.com'
+      x-internal: false
+components:
+  schemas:
+    Error_Response:
+      type: object
+      title: Error Response
+      description: Describes the general format of an HTTP error response.
+      properties:
+        detail:
+          type: string
+          description: Human-readable description of the error.
+          examples:
+            - The timestamp_end parameter was included in the request but no value was supplied.
+        documentation:
+          type: string
+          format: uri
+        field:
+          type: string
+          description: The parameter or field the error relates to (if known).
+          examples:
+            - timestamp_end
+        request_id:
+          type: string
+          description: The unique identifier of this request.
+          format: uuid
+          examples:
+            - 66ea41d-adf5-480b-af50-15b940c2b846
+        resource_uri:
+          type: string
+          description: The requested resource's URI
+          format: uri
+          examples:
+            - /v1/zone-traffic/266ea41d-adf5-480b-af50-15b940c2b846
+        status:
+          type: integer
+          enum:
+            - 400
+            - 401
+            - 403
+            - 404
+            - 405
+            - 422
+            - 429
+            - 500
+          description: The HTTP status code.
+          examples:
+            - '400'
+        timestamp:
+          type: string
+          description: The date and time in UTC the error was generated.
+          format: date-time
+          examples:
+            - '2019-08-24T14:15:22Z'
+        title:
+          type: string
+          description: Human-readable summary of the problem.
+          examples:
+            - Timestamp End value not supplied
+      required:
+        - request_id
+        - status
+        - timestamp
+    SendPasswordResetEmailRequestSchema:
+      type: object
+      title: SendPasswordResetEmailRequestSchema
+      description: Describes the request body for the Send Password Reset Email endpoint.
+      properties:
+        email:
+          type: string
+          format: email
+    SendPasswordResetEmailResponseSchema:
+      type: object
+      title: SendPasswordResetEmailResponseSchema
+      description: Describes the response schema for the Send Password Reset Email endpoint.
+      properties:
+        status_code:
+          type: integer
+          format: int32
+          default: 202
+        message:
+          type: string
+          default: 'OTP has been generated and sent successfully, Please check your registered email'
+        request_uri:
+          type: string
+          format: uri
+          default: /v1/auth/password-reset/otp
+    ResetUserPasswordRequestSchema:
+      type: object
+      title: ResetUserPasswordRequestSchema
+      description: Describes the request body for the Reset User Password endpoint.
+      properties:
+        otp:
+          type: integer
+          format: int32
+          examples:
+            - 123456
+        email:
+          type: string
+          format: email
+        new_password:
+          type: string
+          examples:
+            - MyN3wPa$$w0rd
+    ResetUserPasswordResponseSchema:
+      type: object
+      title: ResetUserPasswordResponseSchema
+      description: Describes the response body for the Reset User Password endpoint.
+      properties:
+        status_code:
+          type: integer
+          format: int32
+          default: 200
+        message:
+          type: string
+          default: Password reset successful. You can now use your new password to log in.
+        request_uri:
+          type: string
+          format: uri
+          examples:
+            - /v1/users/reset-password
+    SigninRequestSchema:
+      type: object
+      title: Signin Request Schema
+      description: Describes the request body for the signin endpoint.
+      properties:
+        username:
+          type: string
+          description: The email address of the user's account. Usually this will have the format "firstname.lastname"
+          examples:
+            - firstname.lastname
+        password:
+          type: string
+          description: The password of the user's account.
+          format: password
+      required:
+        - username
+        - password
+    SigninResponseSchemaNew:
+      title: SigninResponseSchemaNew
+      description: Describes the response of the signin endpoint. The response schema will change depending on whether the user has MFA (Multi Factor Authentication) enabled on their account.
+      oneOf:
+        - $ref: '#/components/schemas/SigninResponseSchemaNewNonMFA'
+        - $ref: '#/components/schemas/SigninResponseSchemaNewMFA'
+    SigninResponseSchemaNewNonMFA:
+      type: object
+      title: SigninResponseSchemaNewNonMFA
+      description: Describes the response of the signin endpoint upon a successful login for non-MFA users.
+      properties:
+        user_id:
+          type: string
+          description: The unique id of the user
+          format: uuid
+        username:
+          type: string
+          description: The username of the user's account. Usually this will have the format "firstname.lastname"
+        first_name:
+          type: string
+          description: The user's first name
+        last_name:
+          type: string
+          description: The user's last name
+        email:
+          type: string
+          description: The user's email address
+          format: email
+        role:
+          type: string
+          description: The user's role. This drives access and permissions for Pole Star's services and products.
+        account_id:
+          type: string
+          description: The unique id of the account the user is associated with
+          format: uuid
+        access-token:
+          type: string
+          description: The JWT access token
+        refresh-token:
+          type: string
+          description: The JWT refresh token
+      required:
+        - user_id
+        - username
+        - first_name
+        - last_name
+        - email
+        - role
+        - account_id
+        - access-token
+        - refresh-token
+    SigninResponseSchemaNewMFA:
+      type: object
+      title: SigninResponseSchemaNewMFA
+      description: Describes the response of the signin endpoint upon a successful login for MFA users.
+      properties:
+        user_id:
+          type: string
+          description: The unique id of the user
+          format: uuid
+        username:
+          type: string
+          description: The username of the user's account. Usually this will have the format "firstname.lastname"
+        first_name:
+          type: string
+          description: The user's first name
+        last_name:
+          type: string
+          description: The user's last name
+        email:
+          type: string
+          description: The user's email address
+          format: email
+        role:
+          type: string
+          description: The user's role. This drives access and permissions for Pole Star's services and products.
+        account_id:
+          type: string
+          description: The unique id of the account the user is associated with
+          format: uuid
+        otp_channel:
+          type: string
+          description: The One Time Passcode (OTP) channel used
+        otp_recipient:
+          type: string
+          description: The recipient of the One Time Passcode (OTP)
+      required:
+        - user_id
+        - username
+        - first_name
+        - last_name
+        - email
+        - role
+        - account_id
+        - otp_channel
+        - otp_recipient
+    RefreshTokenResponseSchemaNew:
+      type: object
+      title: RefreshTokenResponseSchemaNew
+      properties:
+        status_code:
+          type: integer
+          examples:
+            - 200
+        message:
+          type: string
+          examples:
+            - Access token generated
+        resource_uri:
+          type: string
+          format: uri
+          examples:
+            - /v1/refresh-access-token
+        access-token:
+          type: string
+          description: The JWT access token
+        refresh-token:
+          type: string
+          description: The JWT refresh token
+      required:
+        - status_code
+        - message
+        - resource_uri
+        - access-token
+        - refresh-token
+x-internal: false
