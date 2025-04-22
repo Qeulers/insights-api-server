@@ -2,9 +2,20 @@ import httpx
 from fastapi import APIRouter, Request, Response, Query
 from fastapi.responses import JSONResponse
 from starlette.status import HTTP_502_BAD_GATEWAY
+from typing import Optional
 
 EXTERNAL_BASE_URL = "https://api.polestar-production.com/zone-port-insights"
 router = APIRouter(prefix="/zone-port-insights", tags=["Zone Port Insights"])
+
+def flatten_dict(d, parent_key='', sep='_'):
+    items = []
+    for k, v in d.items():
+        new_key = f"{parent_key}{sep}{k}" if parent_key else k
+        if isinstance(v, dict):
+            items.extend(flatten_dict(v, new_key, sep=sep).items())
+        else:
+            items.append((new_key, v))
+    return dict(items)
 
 # /v1/zones search endpoint
 @router.get("/zones")
@@ -12,13 +23,14 @@ async def search_zones(
     request: Request,
     limit: int = Query(100, ge=1, le=500, description="Maximum number of results to return"),
     offset: int = Query(0, ge=0, description="The number of records to skip. Works with limit."),
-    name_contains: str = Query(None, description="Name or partial name of the port/zone to search for."),
-    unlocode: str = Query(None, description="Filter by port UNLOCODE."),
-    country_code: str = Query(None, description="Filter by three-letter country code."),
-    sub_division_code: str = Query(None, description="Filter by sub division code."),
-    wpi_number: int = Query(None, description="Filter by World Port Index number."),
-    type: str = Query(None, description="Type of zone/port. See API docs for allowed values."),
-    sub_type: str = Query(None, description="Sub type of zone/port. See API docs for allowed values.")
+    name_contains: Optional[str] = Query(None, description="Name or partial name of the port/zone to search for."),
+    unlocode: Optional[str] = Query(None, description="Filter by port UNLOCODE."),
+    country_code: Optional[str] = Query(None, description="Filter by three-letter country code."),
+    sub_division_code: Optional[str] = Query(None, description="Filter by sub division code."),
+    wpi_number: Optional[int] = Query(None, description="Filter by World Port Index number."),
+    type: Optional[str] = Query(None, description="Type of zone/port. See API docs for allowed values."),
+    sub_type: Optional[str] = Query(None, description="Sub type of zone/port. See API docs for allowed values."),
+    flatten_json: Optional[bool] = Query(False, description="If true, flatten each object in the data array and return only the data array content.")
 ):
     headers = dict(request.headers)
     headers.pop("host", None)
@@ -48,6 +60,15 @@ async def search_zones(
             resp = await client.get(url, headers=headers, params=params)
     except httpx.RequestError as e:
         return JSONResponse(status_code=HTTP_502_BAD_GATEWAY, content={"detail": str(e)})
+    # Only flatten on 200 and if flatten_json is true
+    if flatten_json and resp.status_code == 200:
+        try:
+            payload = resp.json()
+            if "data" in payload and isinstance(payload["data"], list):
+                flat_data = [flatten_dict(obj) for obj in payload["data"]]
+                return JSONResponse(content=flat_data, status_code=200)
+        except Exception:
+            pass  # fallback to raw response
     return Response(
         content=resp.content,
         status_code=resp.status_code,
@@ -56,13 +77,31 @@ async def search_zones(
     )
 
 # /v1/zone-and-port-traffic/{id_type}/{id} endpoint
-@router.get("/v1/zone-and-port-traffic/{id_type}/{id}")
-async def zone_port_traffic(request: Request, id_type: str, id: str):
+@router.get("/zone-and-port-traffic/{id_type}/{id}")
+async def zone_port_traffic(
+    request: Request,
+    id_type: str,
+    id: str,
+    limit: int = Query(100, ge=1, le=500, description="Maximum number of results to return"),
+    offset: int = Query(0, ge=0, description="The number of records to skip. Works with limit."),
+    timestamp_start: str = Query(None, description="The start date and time in UTC from which to get the vessels in the port."),
+    timestamp_end: str = Query(None, description="The end date and time in UTC for which to get the vessels in the port."),
+    event_type: str = Query(None, description="Filter on specific zone or port events. If omitted, all events will be considered.")
+):
     headers = dict(request.headers)
     headers.pop("host", None)
     if "authorization" not in {k.lower() for k in headers}:
         return JSONResponse(status_code=401, content={"detail": "Missing Authorization header"})
-    params = dict(request.query_params)
+    params = {
+        "limit": limit,
+        "offset": offset,
+    }
+    if timestamp_start is not None:
+        params["timestamp_start"] = timestamp_start
+    if timestamp_end is not None:
+        params["timestamp_end"] = timestamp_end
+    if event_type is not None:
+        params["event_type"] = event_type
     url = f"{EXTERNAL_BASE_URL}/v1/zone-and-port-traffic/{id_type}/{id}"
     try:
         async with httpx.AsyncClient() as client:
