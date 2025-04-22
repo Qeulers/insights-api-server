@@ -33,14 +33,14 @@ async def proxy_request(request: Request, endpoint: str) -> Response:
 async def signin(request: Request):
     return await proxy_request(request, "/account/v1/auth/signin")
 
-@router.post("/access-token-refresh")
+@router.put("/access-token-refresh")
 async def refresh_token(request: Request):
     return await proxy_request(request, "/account/v1/auth/access-token-refresh")
 
-@router.post("/password-reset/otp")
-async def send_password_reset_otp(request: Request):
-    return await proxy_request(request, "/account/v1/auth/password-reset/otp")
+# @router.post("/password-reset/otp")
+# async def send_password_reset_otp(request: Request):
+#     return await proxy_request(request, "/account/v1/auth/password-reset/otp")
 
-@router.post("/password-reset")
-async def reset_password(request: Request):
-    return await proxy_request(request, "/account/v1/auth/password-reset")
+# @router.post("/password-reset")
+# async def reset_password(request: Request):
+#     return await proxy_request(request, "/account/v1/auth/password-reset")

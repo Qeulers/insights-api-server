@@ -7,4 +7,4 @@ app.include_router(auth_router)
 
 @app.get("/")
 def read_root():
-    return {"message": "Welcome to the FastAPI server!"}
+    return {"message": "Welcome to the Insights API server!"}
