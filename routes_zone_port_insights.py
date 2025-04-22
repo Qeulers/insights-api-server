@@ -17,6 +17,21 @@ def flatten_dict(d, parent_key='', sep='_'):
             items.append((new_key, v))
     return dict(items)
 
+def flatten_zone_port_traffic_response(payload):
+    # Returns a list of flattened events, each merged with flattened zone_port_information
+    if (
+        "data" in payload
+        and isinstance(payload["data"], dict)
+        and "events" in payload["data"]
+        and isinstance(payload["data"]["events"], list)
+    ):
+        zone_port_info = flatten_dict(payload["data"].get("zone_port_information", {}), parent_key="zone_port_information")
+        return [
+            {**flatten_dict(event), **zone_port_info}
+            for event in payload["data"]["events"]
+        ]
+    return None
+
 # /v1/zones search endpoint
 @router.get("/zones")
 async def search_zones(
@@ -113,17 +128,8 @@ async def zone_port_traffic(
     if flatten_json and resp.status_code == 200:
         try:
             payload = resp.json()
-            if (
-                "data" in payload
-                and isinstance(payload["data"], dict)
-                and "events" in payload["data"]
-                and isinstance(payload["data"]["events"], list)
-            ):
-                zone_port_info = flatten_dict(payload["data"].get("zone_port_information", {}))
-                flat_events = [
-                    {**flatten_dict(event), **zone_port_info}
-                    for event in payload["data"]["events"]
-                ]
+            flat_events = flatten_zone_port_traffic_response(payload)
+            if flat_events is not None:
                 return JSONResponse(content=flat_events, status_code=200)
         except Exception:
             pass  # fallback to raw response
