@@ -106,7 +106,8 @@ async def zone_port_traffic(
     flatten_json: Optional[bool] = Query(False, description="If true, flatten all events and zone_port_information and return them as a flat list."),
     all_data: Optional[bool] = Query(False, description="If true, fetch all pages and aggregate all events into a single response."),
     flag_country_code: Optional[str] = Query(None, description="Comma separated list of three letter country codes to filter vessel_information.flag_code on."),
-    incl_vessel_type_lvl3: Optional[str] = Query(None, description="Comma separated list of vessel_type_level3 to filter vessel_information.vessel_type on.")
+    incl_vessel_type_lvl3: Optional[str] = Query(None, description="Comma separated list of vessel_type_level3 to filter vessel_information.vessel_type on."),
+    excl_vessel_type_lvl3: Optional[str] = Query(None, description="Comma separated list of vessel_type_level3 to EXCLUDE vessel_information.vessel_type on.")
 ):
     headers = extract_and_validate_headers(request)
     params = build_params(
@@ -115,7 +116,16 @@ async def zone_port_traffic(
     )
     url = f"{EXTERNAL_BASE_URL}/v1/zone-and-port-traffic/{id_type}/{id}"
 
-    def filter_events(events, allowed_codes, allowed_lvl3):
+    # --- Validate incl/excl mutual exclusivity and parse sets ---
+    incl_lvl3_set = set(val.strip().lower() for val in incl_vessel_type_lvl3.split(",") if val.strip()) if incl_vessel_type_lvl3 else set()
+    excl_lvl3_set = set(val.strip().lower() for val in excl_vessel_type_lvl3.split(",") if val.strip()) if excl_vessel_type_lvl3 else set()
+    overlap = incl_lvl3_set & excl_lvl3_set
+    if overlap:
+        raise HTTPException(status_code=400, detail=f"Values cannot be in both incl_vessel_type_lvl3 and excl_vessel_type_lvl3: {sorted(overlap)}")
+    valid_incl_lvl3 = validate_lvl3_values(incl_lvl3_set) if incl_lvl3_set else set()
+    valid_excl_lvl3 = validate_lvl3_values(excl_lvl3_set) if excl_lvl3_set else set()
+
+    def filter_events(events, allowed_codes, allowed_incl_lvl3, allowed_excl_lvl3):
         filtered = events
         # Filter by flag_country_code
         if allowed_codes:
@@ -128,16 +138,24 @@ async def zone_port_traffic(
                     and (str(e["vessel_information"].get("flag_code", "")).upper() in allowed_set)
                 )
             ]
-        # Filter by vessel_type_level3
-        if allowed_lvl3:
-            allowed_lvl3_set = set(val.strip().lower() for val in allowed_lvl3.split(",") if val.strip())
-            valid_lvl3 = validate_lvl3_values(allowed_lvl3_set)
+        # Filter by vessel_type_level3 (include)
+        if allowed_incl_lvl3:
             filtered = [
                 e for e in filtered
                 if (
                     isinstance(e, dict)
                     and isinstance(e.get("vessel_information"), dict)
-                    and vessel_type_matches_lvl3(e["vessel_information"].get("vessel_type"), valid_lvl3)
+                    and vessel_type_matches_lvl3(e["vessel_information"].get("vessel_type"), allowed_incl_lvl3)
+                )
+            ]
+        # Filter by vessel_type_level3 (exclude)
+        if allowed_excl_lvl3:
+            filtered = [
+                e for e in filtered
+                if not (
+                    isinstance(e, dict)
+                    and isinstance(e.get("vessel_information"), dict)
+                    and vessel_type_matches_lvl3(e["vessel_information"].get("vessel_type"), allowed_excl_lvl3)
                 )
             ]
         return filtered
@@ -154,8 +172,8 @@ async def zone_port_traffic(
         )
         zone_port_info_raw = extra_info.get("zone_port_information")
         zone_port_info_flat = flatten_dict(zone_port_info_raw, parent_key="zone_port_information") if zone_port_info_raw else {}
-        # Filter events if flag_country_code or incl_vessel_type_lvl3 is provided
-        filtered_events = filter_events(all_events, flag_country_code, incl_vessel_type_lvl3)
+        # Filter events with all logic
+        filtered_events = filter_events(all_events, flag_country_code, valid_incl_lvl3, valid_excl_lvl3)
         if flatten_json:
             flat_events = [
                 {**flatten_dict(event), **zone_port_info_flat}
@@ -173,13 +191,13 @@ async def zone_port_traffic(
     if resp.status_code == 200:
         try:
             payload = resp.json()
-            # Filter events if flag_country_code or incl_vessel_type_lvl3 is provided
+            # Filter events with all logic
             if (
                 "data" in payload and isinstance(payload["data"], dict)
                 and "events" in payload["data"] and isinstance(payload["data"]["events"], list)
             ):
                 events = payload["data"]["events"]
-                filtered_events = filter_events(events, flag_country_code, incl_vessel_type_lvl3)
+                filtered_events = filter_events(events, flag_country_code, valid_incl_lvl3, valid_excl_lvl3)
                 payload["data"]["events"] = filtered_events
             if flatten_json:
                 flat_events = flatten_zone_port_traffic_response(payload)
