@@ -1,5 +1,5 @@
 import httpx
-from fastapi import APIRouter, Request, Response, Query
+from fastapi import APIRouter, Request, Response, Query, HTTPException
 from fastapi.responses import JSONResponse
 from starlette.status import HTTP_502_BAD_GATEWAY
 from typing import Optional
@@ -32,6 +32,42 @@ def flatten_zone_port_traffic_response(payload):
         ]
     return None
 
+def extract_and_validate_headers(request: Request):
+    headers = dict(request.headers)
+    headers.pop("host", None)
+    if "authorization" not in {k.lower() for k in headers}:
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+    return headers
+
+def build_params(**kwargs):
+    return {k: v for k, v in kwargs.items() if v is not None}
+
+async def paginate_all_data(fetch_page, limit, offset, total_count_key, data_extractor):
+    all_items = []
+    current_offset = offset
+    total_count = None
+    meta = None
+    extra_info = {}
+    while True:
+        resp = await fetch_page(current_offset)
+        if resp.status_code != 200:
+            break
+        payload = resp.json()
+        if meta is None:
+            meta = payload.get("meta", {})
+            total_count = meta.get(total_count_key)
+            # For zone-and-port-traffic, capture zone_port_information
+            if "zone_port_information" in payload.get("data", {}):
+                extra_info["zone_port_information"] = payload["data"]["zone_port_information"]
+        items = data_extractor(payload)
+        if not isinstance(items, list):
+            items = []
+        all_items.extend(items)
+        current_offset += limit
+        if not items or (total_count is not None and current_offset >= total_count):
+            break
+    return meta, all_items, extra_info
+
 # /v1/zones search endpoint
 @router.get("/zones")
 async def search_zones(
@@ -48,28 +84,12 @@ async def search_zones(
     flatten_json: Optional[bool] = Query(False, description="If true, flatten each object in the data array and return only the data array content."),
     all_data: Optional[bool] = Query(False, description="If true, fetch all pages and aggregate all data array objects into a single response.")
 ):
-    headers = dict(request.headers)
-    headers.pop("host", None)
-    if "authorization" not in {k.lower() for k in headers}:
-        return JSONResponse(status_code=401, content={"detail": "Missing Authorization header"})
-    params = {
-        "limit": limit,
-        "offset": offset,
-    }
-    if name_contains is not None:
-        params["name_contains"] = name_contains
-    if unlocode is not None:
-        params["unlocode"] = unlocode
-    if country_code is not None:
-        params["country_code"] = country_code
-    if sub_division_code is not None:
-        params["sub_division_code"] = sub_division_code
-    if wpi_number is not None:
-        params["wpi_number"] = wpi_number
-    if type is not None:
-        params["type"] = type
-    if sub_type is not None:
-        params["sub_type"] = sub_type
+    headers = extract_and_validate_headers(request)
+    params = build_params(
+        limit=limit, offset=offset, name_contains=name_contains, unlocode=unlocode,
+        country_code=country_code, sub_division_code=sub_division_code, wpi_number=wpi_number,
+        type=type, sub_type=sub_type
+    )
     url = f"{EXTERNAL_BASE_URL}/v1/zones"
 
     async def fetch_page(offset_value):
@@ -79,35 +99,18 @@ async def search_zones(
             return await client.get(url, headers=headers, params=page_params)
 
     if all_data:
-        all_data_list = []
-        current_offset = offset
-        total_count = None
-        first_meta = None
-        while True:
-            resp = await fetch_page(current_offset)
-            if resp.status_code != 200:
-                break
-            payload = resp.json()
-            if first_meta is None:
-                first_meta = payload.get("meta", {})
-                total_count = first_meta.get("total_count")
-            data_batch = payload.get("data", [])
-            all_data_list.extend(data_batch)
-            current_offset += limit
-            if not data_batch or (total_count is not None and current_offset >= total_count):
-                break
+        meta, all_data_list, _ = await paginate_all_data(fetch_page, limit, offset, "total_count", lambda p: p.get("data", []))
         if flatten_json:
             flat_data = [flatten_dict(obj) for obj in all_data_list]
             return JSONResponse(content=flat_data, status_code=200)
         else:
-            return JSONResponse(content={"meta": first_meta, "data": all_data_list}, status_code=200)
+            return JSONResponse(content={"meta": meta, "data": all_data_list}, status_code=200)
     # Not all_data: normal single page logic
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(url, headers=headers, params=params)
     except httpx.RequestError as e:
         return JSONResponse(status_code=HTTP_502_BAD_GATEWAY, content={"detail": str(e)})
-    # Only flatten on 200 and if flatten_json is true
     if flatten_json and resp.status_code == 200:
         try:
             payload = resp.json()
@@ -137,62 +140,33 @@ async def zone_port_traffic(
     flatten_json: Optional[bool] = Query(False, description="If true, flatten all events and zone_port_information and return them as a flat list."),
     all_data: Optional[bool] = Query(False, description="If true, fetch all pages and aggregate all events into a single response.")
 ):
-    headers = dict(request.headers)
-    headers.pop("host", None)
-    if "authorization" not in {k.lower() for k in headers}:
-        return JSONResponse(status_code=401, content={"detail": "Missing Authorization header"})
-    params = {
-        "limit": limit,
-        "offset": offset,
-    }
-    if timestamp_start is not None:
-        params["timestamp_start"] = timestamp_start
-    if timestamp_end is not None:
-        params["timestamp_end"] = timestamp_end
-    if event_type is not None:
-        params["event_type"] = event_type
+    headers = extract_and_validate_headers(request)
+    params = build_params(
+        limit=limit, offset=offset,
+        timestamp_start=timestamp_start, timestamp_end=timestamp_end, event_type=event_type
+    )
     url = f"{EXTERNAL_BASE_URL}/v1/zone-and-port-traffic/{id_type}/{id}"
 
-    async def fetch_zone_port_traffic_page(headers, params, url):
+    async def fetch_page(offset_value):
+        page_params = params.copy()
+        page_params["offset"] = offset_value
         async with httpx.AsyncClient() as client:
-            return await client.get(url, headers=headers, params=params)
+            return await client.get(url, headers=headers, params=page_params)
 
     if all_data:
-        all_events = []
-        current_offset = offset
-        total_count = None
-        first_meta = None
-        zone_port_info_raw = None
-        zone_port_info_flat = None
-        while True:
-            page_params = params.copy()
-            page_params["offset"] = current_offset
-            resp = await fetch_zone_port_traffic_page(headers, page_params, url)
-            if resp.status_code != 200:
-                break
-            payload = resp.json()
-            if first_meta is None:
-                first_meta = payload.get("meta", {})
-                total_count = first_meta.get("total_count")
-            # Extract both raw and flat zone_port_information
-            if zone_port_info_raw is None:
-                zone_port_info_raw = payload.get("data", {}).get("zone_port_information")
-                zone_port_info_flat = flatten_dict(zone_port_info_raw, parent_key="zone_port_information") if zone_port_info_raw else {}
-            events_batch = payload.get("data", {}).get("events")
-            if not isinstance(events_batch, list):
-                events_batch = []
-            all_events.extend(events_batch)
-            current_offset += limit
-            if not events_batch or (total_count is not None and current_offset >= total_count):
-                break
+        meta, all_events, extra_info = await paginate_all_data(
+            fetch_page, limit, offset, "total_count", lambda p: p.get("data", {}).get("events", [])
+        )
+        zone_port_info_raw = extra_info.get("zone_port_information")
+        zone_port_info_flat = flatten_dict(zone_port_info_raw, parent_key="zone_port_information") if zone_port_info_raw else {}
         if flatten_json:
             flat_events = [
-                {**flatten_dict(event), **(zone_port_info_flat or {})}
+                {**flatten_dict(event), **zone_port_info_flat}
                 for event in all_events
             ]
             return JSONResponse(content=flat_events, status_code=200)
         else:
-            return JSONResponse(content={"meta": first_meta, "data": {"zone_port_information": zone_port_info_raw, "events": all_events}}, status_code=200)
+            return JSONResponse(content={"meta": meta, "data": {"zone_port_information": zone_port_info_raw, "events": all_events}}, status_code=200)
     # Not all_data: normal single page logic
     try:
         async with httpx.AsyncClient() as client:
