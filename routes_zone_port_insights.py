@@ -3,6 +3,7 @@ from fastapi import APIRouter, Request, Response, Query, HTTPException
 from fastapi.responses import JSONResponse
 from starlette.status import HTTP_502_BAD_GATEWAY
 from typing import Optional
+from utils.api_helpers import extract_and_validate_headers, build_params, paginate_all_data
 
 EXTERNAL_BASE_URL = "https://api.polestar-production.com/zone-port-insights"
 router = APIRouter(prefix="/zone-port-insights", tags=["Zone Port Insights"])
@@ -31,42 +32,6 @@ def flatten_zone_port_traffic_response(payload):
             for event in payload["data"]["events"]
         ]
     return None
-
-def extract_and_validate_headers(request: Request):
-    headers = dict(request.headers)
-    headers.pop("host", None)
-    if "authorization" not in {k.lower() for k in headers}:
-        raise HTTPException(status_code=401, detail="Missing Authorization header")
-    return headers
-
-def build_params(**kwargs):
-    return {k: v for k, v in kwargs.items() if v is not None}
-
-async def paginate_all_data(fetch_page, limit, offset, total_count_key, data_extractor):
-    all_items = []
-    current_offset = offset
-    total_count = None
-    meta = None
-    extra_info = {}
-    while True:
-        resp = await fetch_page(current_offset)
-        if resp.status_code != 200:
-            break
-        payload = resp.json()
-        if meta is None:
-            meta = payload.get("meta", {})
-            total_count = meta.get(total_count_key)
-            # For zone-and-port-traffic, capture zone_port_information
-            if "zone_port_information" in payload.get("data", {}):
-                extra_info["zone_port_information"] = payload["data"]["zone_port_information"]
-        items = data_extractor(payload)
-        if not isinstance(items, list):
-            items = []
-        all_items.extend(items)
-        current_offset += limit
-        if not items or (total_count is not None and current_offset >= total_count):
-            break
-    return meta, all_items, extra_info
 
 # /v1/zones search endpoint
 @router.get("/zones")
