@@ -1,0 +1,60 @@
+vessel_type,vessel_type_level2,vessel_type_level3
+Crude oil tanker,Liquid,Oil tanker
+Shuttle Tanker,Liquid,Oil tanker
+Crude/products oil tanker,Liquid,Oil tanker
+Oil products tanker,Liquid,Oil tanker
+Oil (inland) tanker,Liquid,Oil tanker
+Oil/chemical tanker,Liquid,Oil tanker
+Bunkering Tanker,Liquid,Oil tanker
+Chemical/Products tanker,Liquid,Chemical Tanker 
+LNG carrier,Liquid,Liquified gas carrier
+Combination Gas Tanker,Liquid,Liquified gas carrier
+LPG carrier,Liquid,Liquified gas carrier
+Other liquified gas carrier,Liquid,Liquified gas carrier
+Tank Barge,Liquid,Tank Barge
+"Asphalt, bitumen tanker",Liquid,Other tanker
+Molasses Tanker,Liquid,Other tanker
+Vegetable Oil Tanker,Liquid,Other tanker
+Other tanker,Liquid,Other tanker
+Ore/bulk/Oil carrier,Dry Bulk,Bulk/Oil carrier
+Ore carrier,Dry Bulk,Bulk/Oil carrier
+Bulk carrier,Dry Bulk,Bulk carrier
+Self Discharging Bulk Carrier,Dry Bulk,Bulk carrier
+Container (FC),Other Dry Cargo,Container (FC)
+Specialised Cargo,Other Dry Cargo,Specialsed Carrier
+Livestock carrier,Other Dry Cargo,Specialsed Carrier
+Vehicles Carrier,Other Dry Cargo,Specialsed Carrier
+Aggregates Carrier,Other Dry Cargo,Specialsed Carrier
+Cement Carrier,Other Dry Cargo,Specialsed Carrier
+Heavy Load Carrier,Other Dry Cargo,Specialsed Carrier
+Specialised Cargo,Other Dry Cargo,Specialsed Carrier
+Wood Chips Carrier,Other Dry Cargo,Specialsed Carrier
+Reefer - General Cargo,Other Dry Cargo,General cargo
+General cargo/Ro-Ro,Other Dry Cargo,General cargo
+Container/Ro-Ro,Other Dry Cargo,General cargo
+General cargo/Ro-Ro,Other Dry Cargo,General cargo
+General cargo/passenger,Other Dry Cargo,General cargo
+General cargo,Other Dry Cargo,General cargo
+Dry Cargo Barge,Other Dry Cargo,Dry Cargo Barge
+Passenger Cruise,Other Dry Cargo,Passenger
+Passenger Ferry/Cruise,Other Dry Cargo,Passenger
+Other Passenger,Other Dry Cargo,Passenger
+Fish Processing ,Miscellaneous Types,Fish Processing and catching
+Fishing Vessel,Miscellaneous Types,Fish Processing and catching
+Drilling Ship,Miscellaneous Types,Offshore production and support 
+Offshore production and support,Miscellaneous Types,Offshore production and support 
+FPSO,Miscellaneous Types,Offshore production and support 
+FSO Oil,Miscellaneous Types,Offshore production and support 
+FSO Gas,Miscellaneous Types,Offshore production and support 
+Platform Supply Ship,Miscellaneous Types,Offshore production and support 
+Tug,Miscellaneous Types,Tow-Boat
+Push-boat,Miscellaneous Types,Tow-Boat
+Research/Survey,Miscellaneous Types,Other types
+Dredger,Miscellaneous Types,Other types
+Anchor Hoy,Miscellaneous Types,Other types
+Other Merchant Ship,Miscellaneous Types,Other types
+Cable Layer,Miscellaneous Types,Other types
+Crane Ship,Miscellaneous Types,Other types
+Standby Safety Vessel,Miscellaneous Types,Other types
+Utility Vessel,Miscellaneous Types,Other types
+Other Merchant Ship,Miscellaneous Types,Other types

@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse
 from starlette.status import HTTP_502_BAD_GATEWAY
 from typing import Optional
 from utils.api_helpers import extract_and_validate_headers, build_params, paginate_all_data
+from utils.vessel_type_mapping import vessel_type_matches_lvl3, validate_lvl3_values
 
 EXTERNAL_BASE_URL = "https://api.polestar-production.com/zone-port-insights"
 router = APIRouter(prefix="/zone-port-insights", tags=["Zone Port Insights"])
@@ -103,7 +104,9 @@ async def zone_port_traffic(
     timestamp_end: str = Query(None, description="The end date and time in UTC for which to get the vessels in the port."),
     event_type: str = Query(None, description="Filter on specific zone or port events. If omitted, all events will be considered."),
     flatten_json: Optional[bool] = Query(False, description="If true, flatten all events and zone_port_information and return them as a flat list."),
-    all_data: Optional[bool] = Query(False, description="If true, fetch all pages and aggregate all events into a single response.")
+    all_data: Optional[bool] = Query(False, description="If true, fetch all pages and aggregate all events into a single response."),
+    flag_country_code: Optional[str] = Query(None, description="Comma separated list of three letter country codes to filter vessel_information.flag_code on."),
+    incl_vessel_type_lvl3: Optional[str] = Query(None, description="Comma separated list of vessel_type_level3 to filter vessel_information.vessel_type on.")
 ):
     headers = extract_and_validate_headers(request)
     params = build_params(
@@ -111,6 +114,33 @@ async def zone_port_traffic(
         timestamp_start=timestamp_start, timestamp_end=timestamp_end, event_type=event_type
     )
     url = f"{EXTERNAL_BASE_URL}/v1/zone-and-port-traffic/{id_type}/{id}"
+
+    def filter_events(events, allowed_codes, allowed_lvl3):
+        filtered = events
+        # Filter by flag_country_code
+        if allowed_codes:
+            allowed_set = set(code.strip().upper() for code in allowed_codes.split(",") if code.strip())
+            filtered = [
+                e for e in filtered
+                if (
+                    isinstance(e, dict)
+                    and isinstance(e.get("vessel_information"), dict)
+                    and (str(e["vessel_information"].get("flag_code", "")).upper() in allowed_set)
+                )
+            ]
+        # Filter by vessel_type_level3
+        if allowed_lvl3:
+            allowed_lvl3_set = set(val.strip().lower() for val in allowed_lvl3.split(",") if val.strip())
+            valid_lvl3 = validate_lvl3_values(allowed_lvl3_set)
+            filtered = [
+                e for e in filtered
+                if (
+                    isinstance(e, dict)
+                    and isinstance(e.get("vessel_information"), dict)
+                    and vessel_type_matches_lvl3(e["vessel_information"].get("vessel_type"), valid_lvl3)
+                )
+            ]
+        return filtered
 
     async def fetch_page(offset_value):
         page_params = params.copy()
@@ -124,26 +154,39 @@ async def zone_port_traffic(
         )
         zone_port_info_raw = extra_info.get("zone_port_information")
         zone_port_info_flat = flatten_dict(zone_port_info_raw, parent_key="zone_port_information") if zone_port_info_raw else {}
+        # Filter events if flag_country_code or incl_vessel_type_lvl3 is provided
+        filtered_events = filter_events(all_events, flag_country_code, incl_vessel_type_lvl3)
         if flatten_json:
             flat_events = [
                 {**flatten_dict(event), **zone_port_info_flat}
-                for event in all_events
+                for event in filtered_events
             ]
             return JSONResponse(content=flat_events, status_code=200)
         else:
-            return JSONResponse(content={"meta": meta, "data": {"zone_port_information": zone_port_info_raw, "events": all_events}}, status_code=200)
+            return JSONResponse(content={"meta": meta, "data": {"zone_port_information": zone_port_info_raw, "events": filtered_events}}, status_code=200)
     # Not all_data: normal single page logic
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(url, headers=headers, params=params)
     except httpx.RequestError as e:
         return JSONResponse(status_code=HTTP_502_BAD_GATEWAY, content={"detail": str(e)})
-    if flatten_json and resp.status_code == 200:
+    if resp.status_code == 200:
         try:
             payload = resp.json()
-            flat_events = flatten_zone_port_traffic_response(payload)
-            if flat_events is not None:
-                return JSONResponse(content=flat_events, status_code=200)
+            # Filter events if flag_country_code or incl_vessel_type_lvl3 is provided
+            if (
+                "data" in payload and isinstance(payload["data"], dict)
+                and "events" in payload["data"] and isinstance(payload["data"]["events"], list)
+            ):
+                events = payload["data"]["events"]
+                filtered_events = filter_events(events, flag_country_code, incl_vessel_type_lvl3)
+                payload["data"]["events"] = filtered_events
+            if flatten_json:
+                flat_events = flatten_zone_port_traffic_response(payload)
+                if flat_events is not None:
+                    return JSONResponse(content=flat_events, status_code=200)
+            else:
+                return JSONResponse(content=payload, status_code=200)
         except Exception:
             pass  # fallback to raw response
     return Response(
