@@ -107,7 +107,9 @@ async def zone_port_traffic(
     all_data: Optional[bool] = Query(False, description="If true, fetch all pages and aggregate all events into a single response."),
     flag_country_code: Optional[str] = Query(None, description="Comma separated list of three letter country codes to filter vessel_information.flag_code on."),
     incl_vessel_type_lvl3: Optional[str] = Query(None, description="Comma separated list of vessel_type_level3 to filter vessel_information.vessel_type on."),
-    excl_vessel_type_lvl3: Optional[str] = Query(None, description="Comma separated list of vessel_type_level3 to EXCLUDE vessel_information.vessel_type on.")
+    excl_vessel_type_lvl3: Optional[str] = Query(None, description="Comma separated list of vessel_type_level3 to EXCLUDE vessel_information.vessel_type on."),
+    imo: Optional[str] = Query(None, description="Comma separated list of IMO numbers to filter vessel_information.imo on."),
+    mmsi: Optional[str] = Query(None, description="Comma separated list of MMSI numbers to filter vessel_information.mmsi on."),
 ):
     headers = extract_and_validate_headers(request)
     params = build_params(
@@ -125,7 +127,7 @@ async def zone_port_traffic(
     valid_incl_lvl3 = validate_lvl3_values(incl_lvl3_set) if incl_lvl3_set else set()
     valid_excl_lvl3 = validate_lvl3_values(excl_lvl3_set) if excl_lvl3_set else set()
 
-    def filter_events(events, allowed_codes, allowed_incl_lvl3, allowed_excl_lvl3):
+    def filter_events(events, allowed_codes, allowed_incl_lvl3, allowed_excl_lvl3, allowed_imo, allowed_mmsi):
         filtered = events
         # Filter by flag_country_code
         if allowed_codes:
@@ -158,6 +160,28 @@ async def zone_port_traffic(
                     and vessel_type_matches_lvl3(e["vessel_information"].get("vessel_type"), allowed_excl_lvl3)
                 )
             ]
+        # Filter by IMO
+        if allowed_imo:
+            allowed_imo_set = set(val.strip() for val in allowed_imo.split(",") if val.strip())
+            filtered = [
+                e for e in filtered
+                if (
+                    isinstance(e, dict)
+                    and isinstance(e.get("vessel_information"), dict)
+                    and (str(e["vessel_information"].get("imo", "")) in allowed_imo_set)
+                )
+            ]
+        # Filter by MMSI
+        if allowed_mmsi:
+            allowed_mmsi_set = set(val.strip() for val in allowed_mmsi.split(",") if val.strip())
+            filtered = [
+                e for e in filtered
+                if (
+                    isinstance(e, dict)
+                    and isinstance(e.get("vessel_information"), dict)
+                    and (str(e["vessel_information"].get("mmsi", "")) in allowed_mmsi_set)
+                )
+            ]
         return filtered
 
     async def fetch_page(offset_value):
@@ -173,7 +197,7 @@ async def zone_port_traffic(
         zone_port_info_raw = extra_info.get("zone_port_information")
         zone_port_info_flat = flatten_dict(zone_port_info_raw, parent_key="zone_port_information") if zone_port_info_raw else {}
         # Filter events with all logic
-        filtered_events = filter_events(all_events, flag_country_code, valid_incl_lvl3, valid_excl_lvl3)
+        filtered_events = filter_events(all_events, flag_country_code, valid_incl_lvl3, valid_excl_lvl3, imo, mmsi)
         if flatten_json:
             flat_events = [
                 {**flatten_dict(event), **zone_port_info_flat}
@@ -197,7 +221,7 @@ async def zone_port_traffic(
                 and "events" in payload["data"] and isinstance(payload["data"]["events"], list)
             ):
                 events = payload["data"]["events"]
-                filtered_events = filter_events(events, flag_country_code, valid_incl_lvl3, valid_excl_lvl3)
+                filtered_events = filter_events(events, flag_country_code, valid_incl_lvl3, valid_excl_lvl3, imo, mmsi)
                 payload["data"]["events"] = filtered_events
             if flatten_json:
                 flat_events = flatten_zone_port_traffic_response(payload)
