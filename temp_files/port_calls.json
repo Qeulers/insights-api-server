@@ -1,0 +1,66 @@
+{
+  "meta": {
+    "limit": 100,
+    "offset": 0,
+    "total_count": 639,
+    "request_timestamp": "2025-04-23T12:03:40Z",
+    "zone_version": "0.5.0"
+  },
+  "data": {
+    "zone_port_information": {
+      "centroid": {
+        "longitude": -118.21235472584551,
+        "latitude": 33.75603277732862
+      },
+      "country_official_name": "United States of America",
+      "country_code": "USA",
+      "description": "",
+      "id": "925ec000-577e-4e06-b81c-81d1b5b3358b",
+      "name": "Long Beach",
+      "sub_type": "Port",
+      "type": "Ports",
+      "unlocode": "USLGB",
+      "country_common_name": "United States",
+      "sub_division_code": "US-CA",
+      "sub_division_name": "California",
+      "wpi_number": 16070
+    },
+    "events": [
+      {
+        "vessel_information": {
+          "asset_id": "8625fdcc-b676-44f6-a924-35198966f2a0",
+          "callsign": "WDG8470",
+          "flag": "United States of America",
+          "flag_code": "USA",
+          "imo": "9759692",
+          "mmsi": "367580930",
+          "name": "TRIUMPHANT",
+          "vessel_type": "Passenger Ferry/Cruise",
+          "vessel_type_level3": "Passenger Ferry/Cruise"
+        },
+        "port_call": {
+          "draught_at_arrival": 15.7,
+          "draught_at_departure": 15.7,
+          "port_area_arrival": {
+            "event_id": "9cdd5866-7fab-40d6-89ad-7226a6793b83",
+            "event_timestamp": "2025-04-19T17:11:01Z"
+          },
+          "port_arrival": {
+            "event_id": "9cdd5866-7fab-40d6-89ad-7226a6793b83",
+            "event_timestamp": "2025-04-19T17:11:01Z"
+          },
+          "port_departure": {
+            "event_id": "9cdd5866-7fab-40d6-89ad-7226a6793b83",
+            "event_timestamp": "2025-04-19T17:11:01Z"
+          },
+          "port_area_departure": {
+            "event_id": "9cdd5866-7fab-40d6-89ad-7226a6793b83",
+            "event_timestamp": "2025-04-19T17:11:01Z"
+          },
+          "dwell_time_hrs": 100,
+          "turnaround_time_hrs": 100
+        }
+      }
+    ]
+  }
+}

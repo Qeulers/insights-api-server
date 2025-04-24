@@ -1,0 +1,51 @@
+{
+  "zone_port_information": {
+    "centroid": {
+      "longitude": -118.21235472584551,
+      "latitude": 33.75603277732862
+    },
+    "country_official_name": "United States of America",
+    "country_code": "USA",
+    "description": "",
+    "id": "925ec000-577e-4e06-b81c-81d1b5b3358b",
+    "name": "Long Beach",
+    "sub_type": "Port",
+    "type": "Ports",
+    "unlocode": "USLGB",
+    "country_common_name": "United States",
+    "sub_division_code": "US-CA",
+    "sub_division_name": "California",
+    "wpi_number": 16070
+  },
+  "analytics": {
+    "total": {
+      "nr_port_area_arrivals": 100,
+      "nr_port_arrivals": 100,
+      "nr_port_departures": 100,
+      "nr_port_area_departures": 100,
+      "nr_port_area_stays": 100,
+      "avg_dwell_time_hrs": 100,
+      "avg_turnaround_time_hrs": 100,
+      "min_dwell_time_hrs": 100,
+      "max_dwell_time_hrs": 100,
+      "min_turnaround_time_hrs": 100,
+      "max_turnaround_time_hrs": 100,
+      "composition": {
+        "vessel_type_level3": [
+          {
+            "name": "",
+            "count": 100,
+            "percentage": 100
+          }
+        ],
+        "flag_code": [
+          {
+            "name": "",
+            "count": 100,
+            "percentage": 100
+          }
+        ]
+      }
+    }
+  }
+}

@@ -110,6 +110,8 @@ async def zone_port_traffic(
     excl_vessel_type_lvl3: Optional[str] = Query(None, description="Comma separated list of vessel_type_level3 to EXCLUDE vessel_information.vessel_type on."),
     imo: Optional[str] = Query(None, description="Comma separated list of IMO numbers to filter vessel_information.imo on."),
     mmsi: Optional[str] = Query(None, description="Comma separated list of MMSI numbers to filter vessel_information.mmsi on."),
+    excl_port_information: Optional[bool] = Query(False, description="If true, exclude all fields with the zone_port_information_ prefix from the response when flatten_json is true."),
+    excl_event_details: Optional[bool] = Query(False, description="If true, exclude select fields with the event_details_ prefix from the response when flatten_json is true."),
 ):
     headers = extract_and_validate_headers(request)
     params = build_params(
@@ -184,6 +186,34 @@ async def zone_port_traffic(
             ]
         return filtered
 
+    def filter_flattened_fields(flat_events):
+        """
+        Remove fields according to excl_port_information and excl_event_details from each event dict in flat_events.
+        """
+        if not isinstance(flat_events, list):
+            return flat_events
+        event_details_exclude = {
+            "event_details_course",
+            "event_details_heading",
+            "event_details_navigational_status_status",
+            "event_details_navigational_status_code",
+            "event_details_reported_destination",
+            "event_details_reported_eta",
+            "event_details_speed",
+        }
+        filtered = []
+        for obj in flat_events:
+            if not isinstance(obj, dict):
+                filtered.append(obj)
+                continue
+            filtered_obj = obj.copy()
+            if excl_port_information:
+                filtered_obj = {k: v for k, v in filtered_obj.items() if not k.startswith("zone_port_information_")}
+            if excl_event_details:
+                filtered_obj = {k: v for k, v in filtered_obj.items() if not (k in event_details_exclude)}
+            filtered.append(filtered_obj)
+        return filtered
+
     async def fetch_page(offset_value):
         page_params = params.copy()
         page_params["offset"] = offset_value
@@ -203,6 +233,8 @@ async def zone_port_traffic(
                 {**flatten_dict(event), **zone_port_info_flat}
                 for event in filtered_events
             ]
+            # Apply exclusion filters
+            flat_events = filter_flattened_fields(flat_events)
             return JSONResponse(content=flat_events, status_code=200)
         else:
             return JSONResponse(content={"meta": meta, "data": {"zone_port_information": zone_port_info_raw, "events": filtered_events}}, status_code=200)
@@ -226,6 +258,8 @@ async def zone_port_traffic(
             if flatten_json:
                 flat_events = flatten_zone_port_traffic_response(payload)
                 if flat_events is not None:
+                    # Apply exclusion filters
+                    flat_events = filter_flattened_fields(flat_events)
                     return JSONResponse(content=flat_events, status_code=200)
             else:
                 return JSONResponse(content=payload, status_code=200)
