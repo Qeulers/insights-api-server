@@ -34,6 +34,70 @@ def flatten_zone_port_traffic_response(payload):
         ]
     return None
 
+def filter_vessels_by_params(vessels, flag_country_code=None, incl_vessel_type_lvl3=None, excl_vessel_type_lvl3=None, imo=None, mmsi=None):
+    filtered = vessels
+    # Filter by flag_country_code
+    if flag_country_code:
+        allowed_set = set(code.strip().upper() for code in flag_country_code.split(",") if code.strip())
+        filtered = [
+            v for v in filtered
+            if (
+                isinstance(v, dict)
+                and isinstance(v.get("vessel_information"), dict)
+                and (str(v["vessel_information"].get("flag_code", "")).upper() in allowed_set)
+            )
+        ]
+    # Validate and filter by vessel_type_level3 (include)
+    incl_lvl3_set = set(val.strip().lower() for val in incl_vessel_type_lvl3.split(",") if val.strip()) if incl_vessel_type_lvl3 else set()
+    excl_lvl3_set = set(val.strip().lower() for val in excl_vessel_type_lvl3.split(",") if val.strip()) if excl_vessel_type_lvl3 else set()
+    if incl_lvl3_set and excl_lvl3_set:
+        overlap = incl_lvl3_set & excl_lvl3_set
+        if overlap:
+            raise HTTPException(status_code=400, detail=f"Values cannot be in both incl_vessel_type_lvl3 and excl_vessel_type_lvl3: {sorted(overlap)}")
+    valid_incl_lvl3 = validate_lvl3_values(incl_lvl3_set) if incl_lvl3_set else set()
+    valid_excl_lvl3 = validate_lvl3_values(excl_lvl3_set) if excl_lvl3_set else set()
+    if valid_incl_lvl3:
+        filtered = [
+            v for v in filtered
+            if (
+                isinstance(v, dict)
+                and isinstance(v.get("vessel_information"), dict)
+                and vessel_type_matches_lvl3(v["vessel_information"].get("vessel_type"), valid_incl_lvl3)
+            )
+        ]
+    if valid_excl_lvl3:
+        filtered = [
+            v for v in filtered
+            if not (
+                isinstance(v, dict)
+                and isinstance(v.get("vessel_information"), dict)
+                and vessel_type_matches_lvl3(v["vessel_information"].get("vessel_type"), valid_excl_lvl3)
+            )
+        ]
+    # Filter by IMO
+    if imo:
+        allowed_imo_set = set(val.strip() for val in imo.split(",") if val.strip())
+        filtered = [
+            v for v in filtered
+            if (
+                isinstance(v, dict)
+                and isinstance(v.get("vessel_information"), dict)
+                and (str(v["vessel_information"].get("imo", "")) in allowed_imo_set)
+            )
+        ]
+    # Filter by MMSI
+    if mmsi:
+        allowed_mmsi_set = set(val.strip() for val in mmsi.split(",") if val.strip())
+        filtered = [
+            v for v in filtered
+            if (
+                isinstance(v, dict)
+                and isinstance(v.get("vessel_information"), dict)
+                and (str(v["vessel_information"].get("mmsi", "")) in allowed_mmsi_set)
+            )
+        ]
+    return filtered
+
 # /v1/zones search endpoint
 @router.get("/zones")
 async def search_zones(
@@ -262,6 +326,84 @@ async def zone_port_traffic(
                     flat_events = filter_flattened_fields(flat_events)
                     return JSONResponse(content=flat_events, status_code=200)
             else:
+                return JSONResponse(content=payload, status_code=200)
+        except Exception:
+            pass  # fallback to raw response
+    return Response(
+        content=resp.content,
+        status_code=resp.status_code,
+        headers={k: v for k, v in resp.headers.items() if k.lower() != "content-encoding"},
+        media_type=resp.headers.get("content-type")
+    )
+
+# /v1/vessels-in-zone-or-port/{id_type}/{id} endpoint
+@router.get("/vessels-in-zone-or-port/{id_type}/{id}")
+async def vessels_in_zone_or_port(
+    request: Request,
+    id_type: str,
+    id: str,
+    limit: int = Query(100, ge=1, le=500, description="Maximum number of results to return"),
+    offset: int = Query(0, ge=0, description="The number of records to skip. Works with limit."),
+    flatten_json: Optional[bool] = Query(False, description="If true, return only the vessels array, discarding meta and zone_port_information."),
+    all_data: Optional[bool] = Query(False, description="If true, fetch all pages and aggregate all vessels array objects into a single response."),
+    flag_country_code: Optional[str] = Query(None, description="Comma separated list of three letter country codes to filter vessel_information.flag_code on."),
+    incl_vessel_type_lvl3: Optional[str] = Query(None, description="Comma separated list of vessel_type_level3 to filter vessel_information.vessel_type on."),
+    excl_vessel_type_lvl3: Optional[str] = Query(None, description="Comma separated list of vessel_type_level3 to EXCLUDE vessel_information.vessel_type on."),
+    imo: Optional[str] = Query(None, description="Comma separated list of IMO numbers to filter vessel_information.imo on."),
+    mmsi: Optional[str] = Query(None, description="Comma separated list of MMSI numbers to filter vessel_information.mmsi on."),
+):
+    headers = extract_and_validate_headers(request)
+    params = build_params(limit=limit, offset=offset)
+    url = f"{EXTERNAL_BASE_URL}/v1/vessels-in-zone-or-port/{id_type}/{id}"
+
+    async def fetch_page(offset_value):
+        page_params = params.copy()
+        page_params["offset"] = offset_value
+        async with httpx.AsyncClient() as client:
+            return await client.get(url, headers=headers, params=page_params)
+
+    if all_data:
+        meta, all_vessels, extra_info = await paginate_all_data(
+            fetch_page, limit, offset, "total_count", lambda p: p.get("data", {}).get("vessels", [])
+        )
+        filtered_vessels = filter_vessels_by_params(
+            all_vessels,
+            flag_country_code=flag_country_code,
+            incl_vessel_type_lvl3=incl_vessel_type_lvl3,
+            excl_vessel_type_lvl3=excl_vessel_type_lvl3,
+            imo=imo,
+            mmsi=mmsi,
+        )
+        if flatten_json:
+            return JSONResponse(content=filtered_vessels, status_code=200)
+        else:
+            zone_port_info = extra_info.get("zone_port_information") if extra_info else None
+            return JSONResponse(content={"meta": meta, "data": {"zone_port_information": zone_port_info, "vessels": filtered_vessels}}, status_code=200)
+
+    # Not all_data: normal single page logic
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, headers=headers, params=params)
+    except httpx.RequestError as e:
+        return JSONResponse(status_code=HTTP_502_BAD_GATEWAY, content={"detail": str(e)})
+    if resp.status_code == 200:
+        try:
+            payload = resp.json()
+            vessels = []
+            if "data" in payload and isinstance(payload["data"], dict) and "vessels" in payload["data"]:
+                vessels = payload["data"]["vessels"]
+            filtered_vessels = filter_vessels_by_params(
+                vessels,
+                flag_country_code=flag_country_code,
+                incl_vessel_type_lvl3=incl_vessel_type_lvl3,
+                excl_vessel_type_lvl3=excl_vessel_type_lvl3,
+                imo=imo,
+                mmsi=mmsi,
+            )
+            if flatten_json:
+                return JSONResponse(content=filtered_vessels, status_code=200)
+            else:
+                payload["data"]["vessels"] = filtered_vessels
                 return JSONResponse(content=payload, status_code=200)
         except Exception:
             pass  # fallback to raw response
