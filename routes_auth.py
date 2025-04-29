@@ -37,10 +37,10 @@ async def signin(request: Request):
 async def refresh_token(request: Request):
     return await proxy_request(request, "/account/v1/auth/access-token-refresh")
 
-# @router.post("/password-reset/otp")
-# async def send_password_reset_otp(request: Request):
-#     return await proxy_request(request, "/account/v1/auth/password-reset/otp")
+@router.post("/password-reset/otp")
+async def send_password_reset_otp(request: Request):
+    return await proxy_request(request, "/account/v1/auth/password-reset/otp")
 
-# @router.post("/password-reset")
-# async def reset_password(request: Request):
-#     return await proxy_request(request, "/account/v1/auth/password-reset")
+@router.post("/password-reset")
+async def reset_password(request: Request):
+    return await proxy_request(request, "/account/v1/auth/password-reset")
