@@ -171,10 +171,13 @@ async def get_zone_by_id(zone_id: str):
     client = MongoClient(mongo_url)
     db = client[db_name]
     collection = db[collection_name]
-    result = collection.find_one({"zone_id": zone_id})
+    zone_id_stripped = zone_id.strip()
+    result = collection.find_one({"zone_id": zone_id_stripped})
+    if not result:
+        result = collection.find_one({"zone_id": {"$regex": f"^{zone_id_stripped}$", "$options": "i"}})
     if not result:
         raise HTTPException(status_code=404, detail="Zone not found.")
-    result["_id"] = str(result["_id"])  # Convert ObjectId to string for JSON serialization
+    result["_id"] = str(result["_id"])
     return result
 
 # /v1/zone-and-port-traffic/{id_type}/{id} endpoint
