@@ -5,6 +5,9 @@ from starlette.status import HTTP_502_BAD_GATEWAY
 from typing import Optional
 from utils.api_helpers import extract_and_validate_headers, build_params, paginate_all_data
 from utils.vessel_type_mapping import vessel_type_matches_lvl3, validate_lvl3_values
+from pymongo import MongoClient
+from dotenv import load_dotenv
+import os
 
 EXTERNAL_BASE_URL = "https://api.polestar-production.com/zone-port-insights"
 router = APIRouter(prefix="/zone-port-insights", tags=["Zone Port Insights"])
@@ -112,7 +115,7 @@ async def search_zones(
     type: Optional[str] = Query(None, description="Type of zone/port. See API docs for allowed values."),
     sub_type: Optional[str] = Query(None, description="Sub type of zone/port. See API docs for allowed values."),
     flatten_json: Optional[bool] = Query(False, description="If true, flatten each object in the data array and return only the data array content."),
-    all_data: Optional[bool] = Query(False, description="If true, fetch all pages and aggregate all data array objects into a single response.")
+    all_data: Optional[bool] = Query(False, description="If true, fetch all pages and aggregate all data array objects into a single response."),
 ):
     headers = extract_and_validate_headers(request)
     params = build_params(
@@ -155,6 +158,24 @@ async def search_zones(
         headers={k: v for k, v in resp.headers.items() if k.lower() != "content-encoding"},
         media_type=resp.headers.get("content-type")
     )
+
+# /v1/zones/{id} endpoint
+@router.get("/zones/{zone_id}")
+async def get_zone_by_id(zone_id: str):
+    load_dotenv()
+    mongo_url = os.getenv("MONGO_URL")
+    db_name = os.getenv("MONGO_DB_NAME_ZONES")
+    collection_name = os.getenv("MONGO_COLLECTION_NAME_ZONES")
+    if not all([mongo_url, db_name, collection_name]):
+        raise HTTPException(status_code=500, detail="MongoDB configuration is missing.")
+    client = MongoClient(mongo_url)
+    db = client[db_name]
+    collection = db[collection_name]
+    result = collection.find_one({"zone_id": zone_id})
+    if not result:
+        raise HTTPException(status_code=404, detail="Zone not found.")
+    result["_id"] = str(result["_id"])  # Convert ObjectId to string for JSON serialization
+    return result
 
 # /v1/zone-and-port-traffic/{id_type}/{id} endpoint
 @router.get("/zone-and-port-traffic/{id_type}/{id}")
