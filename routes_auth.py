@@ -1,5 +1,5 @@
 import httpx
-from fastapi import APIRouter, Request, Response, Depends
+from fastapi import APIRouter, Request, Response, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from starlette.status import HTTP_502_BAD_GATEWAY
 import os
@@ -89,23 +89,28 @@ async def signin(request: Request):
             collection = get_users_collection()
             existing = collection.find_one({"user_id": user_data["user_id"]})
             now_utc = datetime.now(timezone.utc).isoformat()
-            if not existing:
-                user_doc = {
-                    **user_data,
-                    "is_logged_in": True,
-                    "last_login": now_utc,
-                    "settings": {
-                        "saved_entities": [],
-                        "recent_searches": []
+            try:
+                if not existing:
+                    user_doc = {
+                        **user_data,
+                        "is_logged_in": True,
+                        "last_login": now_utc,
+                        "settings": {
+                            "saved_entities": [],
+                            "recent_searches": []
+                        }
                     }
-                }
-                collection.insert_one(user_doc)
-            else:
-                # User exists, update login state and last_login
-                collection.update_one(
-                    {"user_id": user_data["user_id"]},
-                    {"$set": {"is_logged_in": True, "last_login": now_utc}}
-                )
+                    collection.insert_one(user_doc)
+                else:
+                    # User exists, update login state and last_login
+                    update_result = collection.update_one(
+                        {"user_id": user_data["user_id"]},
+                        {"$set": {"is_logged_in": True, "last_login": now_utc}}
+                    )
+                    if update_result.modified_count == 0 and update_result.matched_count == 0:
+                        raise Exception("Failed to update user login state.")
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"User creation or update failed: {str(e)}")
     except Exception as e:
         # Log or handle error, but do not block signin response
         pass
