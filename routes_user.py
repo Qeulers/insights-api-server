@@ -93,6 +93,19 @@ async def logout_user(user_id: str):
         raise HTTPException(status_code=404, detail="User not found.")
     return {"message": f"User {user_id} logged out successfully."}
 
+# POST /users/{user_id}/login: set is_logged_in to true and update last_login
+@router.post("/users/{user_id}/login")
+async def login_user(user_id: str):
+    collection = get_users_collection()
+    now_utc = datetime.now(timezone.utc).isoformat()
+    result = collection.update_one(
+        {"user_id": user_id.strip()},
+        {"$set": {"is_logged_in": True, "last_login": now_utc}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found.")
+    return {"message": f"User {user_id} logged in successfully."}
+
 # GET /users/{user_id}/is-logged-in: check if user is logged in
 @router.get("/users/{user_id}/is-logged-in")
 async def is_user_logged_in(user_id: str):

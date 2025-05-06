@@ -88,8 +88,8 @@ async def signin(request: Request):
         if all(user_data.values()):
             collection = get_users_collection()
             existing = collection.find_one({"user_id": user_data["user_id"]})
+            now_utc = datetime.now(timezone.utc).isoformat()
             if not existing:
-                now_utc = datetime.now(timezone.utc).isoformat()
                 user_doc = {
                     **user_data,
                     "is_logged_in": True,
@@ -100,6 +100,12 @@ async def signin(request: Request):
                     }
                 }
                 collection.insert_one(user_doc)
+            else:
+                # User exists, update login state and last_login
+                collection.update_one(
+                    {"user_id": user_data["user_id"]},
+                    {"$set": {"is_logged_in": True, "last_login": now_utc}}
+                )
     except Exception as e:
         # Log or handle error, but do not block signin response
         pass
