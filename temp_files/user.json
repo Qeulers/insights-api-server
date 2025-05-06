@@ -1,0 +1,15 @@
+{
+  "user_id": "string",
+  "username": "string",
+  "first_name": "string",
+  "last_name": "string",
+  "email": "string",
+  "role": "string",
+  "account_id": "string",
+  "is_logged_in": true,
+  "last_login": "string",
+  "settings": {
+    "saved_entities": [],
+    "recent_searches": []
+  }
+}
