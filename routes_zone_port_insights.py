@@ -161,14 +161,14 @@ async def search_zones(
 
 # /v1/zones/{id} endpoint
 @router.get("/zones/{zone_id}")
-async def get_zone_by_id(zone_id: str, user_id: str = Query(..., description="User ID for authentication")):
+async def get_zone_by_id(request: Request, zone_id: str, user_id: str = Query(..., description="User ID for authentication")):
     # Check if user is logged in
     import httpx
     from fastapi import status
-    base_url = os.getenv("BASE_URL", "http://127.0.0.1:8000")
+    base_url = str(request.base_url)
     async with httpx.AsyncClient() as client:
         try:
-            resp = await client.get(f"{base_url}/users/{user_id}/is-logged-in")
+            resp = await client.get(f"{base_url}users/{user_id}/is-logged-in")
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to check user login: {str(e)}")
         if resp.status_code == 404:
@@ -178,7 +178,6 @@ async def get_zone_by_id(zone_id: str, user_id: str = Query(..., description="Us
         is_logged_in = resp.json().get("is_logged_in", False)
         if not is_logged_in:
             raise HTTPException(status_code=403, detail="User not logged in.")
-    load_dotenv()
     mongo_url = os.getenv("MONGO_URL")
     db_name = os.getenv("MONGO_DB_NAME_ZONES")
     collection_name = os.getenv("MONGO_COLLECTION_NAME_ZONES")
