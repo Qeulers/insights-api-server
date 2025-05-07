@@ -195,6 +195,54 @@ async def get_zone_by_id(request: Request, zone_id: str, user_id: str = Query(..
     result["_id"] = str(result["_id"])
     return result
 
+# /zone-port-insights/zones/bulk-request endpoint
+from fastapi import Body
+from typing import List
+
+@router.post("/zones/bulk-request")
+async def bulk_get_zones_by_id(
+    request: Request,
+    user_id: str = Query(..., description="User ID for authentication"),
+    zone_ids: List[str] = Body(..., description="List of zone IDs to fetch")
+):
+    import httpx
+    from fastapi import status
+    base_url = str(request.base_url)
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get(f"{base_url}users/{user_id}/is-logged-in")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to check user login: {str(e)}")
+        if resp.status_code == 404:
+            raise HTTPException(status_code=404, detail="User not found.")
+        elif resp.status_code != 200:
+            raise HTTPException(status_code=500, detail="Failed to check user login.")
+        is_logged_in = resp.json().get("is_logged_in", False)
+        if not is_logged_in:
+            raise HTTPException(status_code=403, detail="User not logged in.")
+    mongo_url = os.getenv("MONGO_URL")
+    db_name = os.getenv("MONGO_DB_NAME_ZONES")
+    collection_name = os.getenv("MONGO_COLLECTION_NAME_ZONES")
+    if not all([mongo_url, db_name, collection_name]):
+        raise HTTPException(status_code=500, detail="MongoDB configuration is missing.")
+    client = MongoClient(mongo_url)
+    db = client[db_name]
+    collection = db[collection_name]
+    found_zones = []
+    seen_ids = set()
+    for zid in zone_ids:
+        zid_stripped = zid.strip()
+        if zid_stripped in seen_ids:
+            continue  # avoid duplicate queries
+        seen_ids.add(zid_stripped)
+        zone = collection.find_one({"zone_id": zid_stripped})
+        if not zone:
+            zone = collection.find_one({"zone_id": {"$regex": f"^{zid_stripped}$", "$options": "i"}})
+        if zone:
+            zone["_id"] = str(zone["_id"])
+            found_zones.append(zone)
+    return found_zones
+
 # /v1/zone-and-port-traffic/{id_type}/{id} endpoint
 @router.get("/zone-and-port-traffic/{id_type}/{id}")
 async def zone_port_traffic(
