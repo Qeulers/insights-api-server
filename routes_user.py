@@ -106,6 +106,86 @@ async def login_user(user_id: str):
         raise HTTPException(status_code=404, detail="User not found.")
     return {"message": f"User {user_id} logged in successfully."}
 
+# GET /users/{user_id}/settings: retrieve user settings only
+@router.get("/users/{user_id}/settings")
+async def get_user_settings(user_id: str, request: Request):
+    import httpx
+    # Check if user is logged in
+    base_url = str(request.base_url)
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get(f"{base_url}users/{user_id}/is-logged-in")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to check user login: {str(e)}")
+        if resp.status_code == 404:
+            raise HTTPException(status_code=404, detail="User not found.")
+        if resp.status_code != 200 or not resp.json().get("is_logged_in", False):
+            raise HTTPException(status_code=401, detail="User is not logged in.")
+    collection = get_users_collection()
+    user = collection.find_one({"user_id": user_id.strip()})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    settings = user.get("settings", {})
+    return settings
+
+# PUT /users/{user_id}/saved-entities: edit saved_entities array
+@router.put("/users/{user_id}/saved-entities")
+async def edit_saved_entities(user_id: str, request: Request):
+    import httpx
+    from fastapi import status
+    # Check if user is logged in
+    base_url = str(request.base_url)
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get(f"{base_url}users/{user_id}/is-logged-in")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to check user login: {str(e)}")
+        if resp.status_code == 404:
+            raise HTTPException(status_code=404, detail="User not found.")
+        if resp.status_code != 200 or not resp.json().get("is_logged_in", False):
+            raise HTTPException(status_code=401, detail="User is not logged in.")
+    collection = get_users_collection()
+    body = await request.json()
+    add = body.get("add", [])
+    remove = body.get("remove", [])
+
+    # Find the user
+    user = collection.find_one({"user_id": user_id.strip()})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    # Ensure settings and saved_entities exist
+    settings = user.get("settings", {})
+    saved_entities = settings.get("saved_entities", [])
+
+    # Remove entities in 'remove'
+    remove_set = set((e["id"], e["type"]) for e in remove if "id" in e and "type" in e)
+    saved_entities = [e for e in saved_entities if (e.get("id"), e.get("type")) not in remove_set]
+
+    # Add entities in 'add' if not already present
+    existing_set = set((e.get("id"), e.get("type")) for e in saved_entities)
+    from datetime import datetime, timezone
+    for entity in add:
+        if "id" in entity and "type" in entity:
+            key = (entity["id"], entity["type"])
+            if key not in existing_set:
+                # Add saved_at timestamp
+                entity_with_timestamp = dict(entity)
+                entity_with_timestamp["saved_at"] = datetime.now(timezone.utc).isoformat()
+                saved_entities.append(entity_with_timestamp)
+                existing_set.add(key)
+
+    # Update user document
+    settings["saved_entities"] = saved_entities
+    result = collection.update_one(
+        {"user_id": user_id.strip()},
+        {"$set": {"settings.saved_entities": saved_entities}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found during update.")
+
+    return {"saved_entities": saved_entities}
+
 # GET /users/{user_id}/is-logged-in: check if user is logged in
 @router.get("/users/{user_id}/is-logged-in")
 async def is_user_logged_in(user_id: str):
