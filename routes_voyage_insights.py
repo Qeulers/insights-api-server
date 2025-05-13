@@ -473,5 +473,90 @@ async def vessel_positional_discrepancy(
     )
 
 @router.get("/vessel-port-state-control/{imo}")
-async def vessel_port_state_control(request: Request, imo: str = Path(...)):
-    return await proxy_request(request, "/v1/vessel-port-state-control/{imo}", {"imo": imo})
+async def vessel_port_state_control(
+    request: Request, 
+    imo: str = Path(...),
+    limit: int = Query(100, ge=1, le=500, description="Maximum number of results to return"),
+    offset: int = Query(0, ge=0, description="The number of records to skip. Works with limit."),
+    timestamp_start: str = Query(None, description="The start date and time in UTC from which to get the inspections."),
+    timestamp_end: str = Query(None, description="The end date and time in UTC for which to get the inspections."),
+    flatten_json: Optional[bool] = Query(False, description="If true, flatten all inspections and return them as a flat list."),
+    all_data: Optional[bool] = Query(False, description="If true, fetch all pages and aggregate all inspections into a single response.")
+):
+    headers = extract_and_validate_headers(request)
+    params = build_params(
+        limit=limit, offset=offset,
+        timestamp_start=timestamp_start, timestamp_end=timestamp_end
+    )
+    url = f"{EXTERNAL_BASE_URL}/v1/vessel-port-state-control/{imo}"
+    
+    async def fetch_page(offset_value):
+        page_params = params.copy()
+        page_params["offset"] = offset_value
+        async with httpx.AsyncClient() as client:
+            return await client.get(url, headers=headers, params=page_params)
+    
+    if all_data:
+        # Create a container for extra_info that can be accessed from the nested function
+        extra_info_container = {}
+        
+        # Define a custom extractor that also captures vessel_information
+        def extract_data_and_vessel_info(payload):
+            if "data" in payload and isinstance(payload["data"], dict):
+                if "vessel_information" in payload["data"]:
+                    extra_info_container["vessel_information"] = payload["data"]["vessel_information"]
+                return payload["data"].get("inspections", [])
+            return []
+        
+        meta, all_inspections, _ = await paginate_all_data(
+            fetch_page, limit, offset, "total_count", extract_data_and_vessel_info
+        )
+        
+        # Get vessel_information from our container
+        vessel_info = extra_info_container.get("vessel_information", {})
+        vessel_info_flat = flatten_dict(vessel_info, parent_key="vessel_information") if vessel_info else {}
+        
+        if flatten_json:
+            flat_inspections = []
+            for inspection in all_inspections:
+                # Create a flattened inspection
+                flat_inspection = flatten_dict(inspection)
+                # Add vessel information
+                flat_inspection.update(vessel_info_flat)
+                flat_inspections.append(flat_inspection)
+            return JSONResponse(content=flat_inspections, status_code=200)
+        else:
+            return JSONResponse(content={"meta": meta, "data": {"vessel_information": vessel_info, "inspections": all_inspections}}, status_code=200)
+    
+    # Not all_data: normal single page logic
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, headers=headers, params=params)
+    except httpx.RequestError as e:
+        return JSONResponse(status_code=HTTP_502_BAD_GATEWAY, content={"detail": str(e)})
+    
+    if resp.status_code == 200 and flatten_json:
+        try:
+            payload = resp.json()
+            if "data" in payload and isinstance(payload["data"], dict) and "inspections" in payload["data"]:
+                inspections = payload["data"]["inspections"]
+                vessel_info = payload["data"].get("vessel_information", {})
+                vessel_info_flat = flatten_dict(vessel_info, parent_key="vessel_information") if vessel_info else {}
+                
+                flat_inspections = []
+                for inspection in inspections:
+                    # Create a flattened inspection
+                    flat_inspection = flatten_dict(inspection)
+                    # Add vessel information
+                    flat_inspection.update(vessel_info_flat)
+                    flat_inspections.append(flat_inspection)
+                return JSONResponse(content=flat_inspections, status_code=200)
+        except Exception:
+            pass  # fallback to raw response
+    
+    return Response(
+        content=resp.content,
+        status_code=resp.status_code,
+        headers={k: v for k, v in resp.headers.items() if k.lower() != "content-encoding"},
+        media_type=resp.headers.get("content-type")
+    )
