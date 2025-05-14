@@ -416,11 +416,12 @@ async def vessel_positional_discrepancy(
                     extra_info_container["vessel_information"] = payload["data"]["vessel_information"]
                 return payload["data"].get("events", [])
             return []
-        
-        meta, all_events, _ = await paginate_all_data(
-            fetch_page, limit, offset, "total_count", extract_data_and_vessel_info
-        )
-        
+        try:
+            meta, all_events, _ = await paginate_all_data(
+                fetch_page, limit, offset, "total_count", extract_data_and_vessel_info
+            )
+        except HTTPException as exc:
+            return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
         # Get vessel_information from our container
         vessel_info = extra_info_container.get("vessel_information", {})
         vessel_info_flat = flatten_dict(vessel_info, parent_key="vessel_information") if vessel_info else {}
@@ -507,11 +508,12 @@ async def vessel_port_state_control(
                     extra_info_container["vessel_information"] = payload["data"]["vessel_information"]
                 return payload["data"].get("inspections", [])
             return []
-        
-        meta, all_inspections, _ = await paginate_all_data(
-            fetch_page, limit, offset, "total_count", extract_data_and_vessel_info
-        )
-        
+        try:
+            meta, all_inspections, _ = await paginate_all_data(
+                fetch_page, limit, offset, "total_count", extract_data_and_vessel_info
+            )
+        except HTTPException as exc:
+            return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
         # Get vessel_information from our container
         vessel_info = extra_info_container.get("vessel_information", {})
         vessel_info_flat = flatten_dict(vessel_info, parent_key="vessel_information") if vessel_info else {}

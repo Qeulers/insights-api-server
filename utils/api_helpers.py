@@ -39,7 +39,12 @@ async def paginate_all_data(
     while True:
         resp = await fetch_page(current_offset)
         if resp.status_code != 200:
-            break
+            # Propagate error immediately with details for the endpoint to handle
+            try:
+                detail = resp.json()
+            except Exception:
+                detail = resp.text
+            raise HTTPException(status_code=resp.status_code, detail=detail)
         payload = resp.json()
         if meta is None:
             meta = payload.get("meta", {})

@@ -132,7 +132,10 @@ async def search_zones(
             return await client.get(url, headers=headers, params=page_params)
 
     if all_data:
-        meta, all_data_list, _ = await paginate_all_data(fetch_page, limit, offset, "total_count", lambda p: p.get("data", []))
+        try:
+            meta, all_data_list, _ = await paginate_all_data(fetch_page, limit, offset, "total_count", lambda p: p.get("data", []))
+        except HTTPException as exc:
+            return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
         if flatten_json:
             flat_data = [flatten_dict(obj) for obj in all_data_list]
             return JSONResponse(content=flat_data, status_code=200)
@@ -372,9 +375,12 @@ async def zone_port_traffic(
             return await client.get(url, headers=headers, params=page_params)
 
     if all_data:
-        meta, all_events, extra_info = await paginate_all_data(
-            fetch_page, limit, offset, "total_count", lambda p: p.get("data", {}).get("events", [])
-        )
+        try:
+            meta, all_events, extra_info = await paginate_all_data(
+                fetch_page, limit, offset, "total_count", lambda p: p.get("data", {}).get("events", [])
+            )
+        except HTTPException as exc:
+            return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
         zone_port_info_raw = extra_info.get("zone_port_information")
         zone_port_info_flat = flatten_dict(zone_port_info_raw, parent_key="zone_port_information") if zone_port_info_raw else {}
         # Filter events with all logic
@@ -450,9 +456,12 @@ async def vessels_in_zone_or_port(
             return await client.get(url, headers=headers, params=page_params)
 
     if all_data:
-        meta, all_vessels, extra_info = await paginate_all_data(
-            fetch_page, limit, offset, "total_count", lambda p: p.get("data", {}).get("vessels", [])
-        )
+        try:
+            meta, all_vessels, extra_info = await paginate_all_data(
+                fetch_page, limit, offset, "total_count", lambda p: p.get("data", {}).get("vessels", [])
+            )
+        except HTTPException as exc:
+            return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
         filtered_vessels = filter_vessels_by_params(
             all_vessels,
             flag_country_code=flag_country_code,
