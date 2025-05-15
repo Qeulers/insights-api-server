@@ -1,5 +1,5 @@
 import httpx
-from fastapi import APIRouter, Request, Response, Query, HTTPException
+from fastapi import APIRouter, Request, Response, Query, HTTPException, Body
 from fastapi.responses import JSONResponse
 from starlette.status import HTTP_502_BAD_GATEWAY
 from typing import Optional
@@ -56,10 +56,75 @@ async def vessel_characteristics(request: Request, imo: int, flatten_json: Optio
     )
 
 
+@router.post("/vessel-characteristics")
+async def vessel_characteristics_bulk(request: Request, imos: list = Body(..., example=["9183934", "9239795"])):
+    """
+    Bulk lookup of vessel characteristics for an array of IMO numbers (max 50).
+    Always returns a list of flattened vessel characteristics (order matches input).
+    Fails the entire request if any lookup fails.
+    """
+    print(f"Incoming IMOs: {imos}")
+    headers = dict(request.headers)
+    headers.pop("host", None)
+    headers.pop("content-length", None)
+    headers.pop("content-type", None)
+    # Only allow requests with Authorization header
+    if "authorization" not in {k.lower() for k in headers}:
+        return JSONResponse(status_code=401, content={"detail": "Missing Authorization header"})
+    # Validate input
+    if not isinstance(imos, list) or not all(isinstance(x, (str, int)) for x in imos):
+        return JSONResponse(status_code=400, content={"detail": "Request body must be a list of IMO numbers (str or int)."})
+    if len(imos) == 0:
+        return JSONResponse(status_code=400, content={"detail": "Request body must contain at least one IMO number."})
+    if len(imos) > 50:
+        return JSONResponse(status_code=400, content={"detail": "Maximum 50 IMO numbers allowed per request."})
+    # Prepare
+    imos_str = [str(x) for x in imos]
+    results = []
+    url_template = f"{EXTERNAL_BASE_URL}/v1/vessel-characteristics/{{imo}}"
+    try:
+        async with httpx.AsyncClient() as client:
+            for imo in imos_str:
+                print(f"Processing IMO: {imo}")
+                ext_url = url_template.format(imo=imo)
+                print(f"Upstream URL: {ext_url}")
+                try:
+                    resp = await client.get(ext_url, headers=headers)
+                    print(f"Upstream response for IMO {imo}: {resp.status_code}")
+                except httpx.RequestError as e:
+                    print(f"Upstream error for IMO {imo}: {str(e)}")
+                    return JSONResponse(status_code=HTTP_502_BAD_GATEWAY, content={"detail": f"Upstream error for IMO {imo}: {str(e)}"})
+                if resp.status_code != 200:
+                    # Try to extract error detail if present
+                    try:
+                        detail = resp.json().get("detail")
+                    except Exception:
+                        detail = resp.text
+                    print(f"Upstream error for IMO {imo}: {resp.status_code} {resp.headers} {detail}")
+                    return JSONResponse(status_code=resp.status_code, content={"detail": f"Upstream error for IMO {imo}: {detail}"})
+                try:
+                    payload = resp.json()
+                    if "data" not in payload:
+                        return JSONResponse(status_code=502, content={"detail": f"Malformed upstream response for IMO {imo}"})
+                    flat = flatten_dict(payload["data"])
+                    results.append(flat)
+                except (getattr(httpx, 'DecodingError', Exception), getattr(httpx, 'IncompleteRead', Exception)) as e:
+                    # Handle incomplete or truncated upstream responses
+                    print(f"Upstream response incomplete or truncated for IMO {imo}: {str(e)}")
+                    return JSONResponse(status_code=502, content={"detail": f"Upstream response incomplete or truncated for IMO {imo}: {str(e)}"})
+                except Exception as e:
+                    print(f"Failed to parse/flatten upstream response for IMO {imo}: {str(e)}")
+                    return JSONResponse(status_code=502, content={"detail": f"Failed to parse/flatten upstream response for IMO {imo}: {str(e)}"})
+
+    except Exception as e:
+        print(f"Internal error: {str(e)}")
+        return JSONResponse(status_code=500, content={"detail": f"Internal error: {str(e)}"})
+    return JSONResponse(content=results, status_code=200)
+
+
 @router.get("/vessels/search")
 async def search_vessels(
     request: Request,
-    user_id: str = Query(..., description="User ID for authentication"),
     limit: int = Query(500, ge=1, le=500, description="Maximum number of results to return"),
     offset: int = Query(0, ge=0, description="The number of records to skip. Works with limit."),
     imo_number__startswith: Optional[str] = Query(None, description="Filter by IMO number prefix."),
