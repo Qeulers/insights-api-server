@@ -125,6 +125,7 @@ async def vessel_characteristics_bulk(request: Request, imos: list = Body(..., e
 @router.get("/vessels/search")
 async def search_vessels(
     request: Request,
+    user_id: str = Query(..., description="User ID for authentication"),
     limit: int = Query(500, ge=1, le=500, description="Maximum number of results to return"),
     offset: int = Query(0, ge=0, description="The number of records to skip. Works with limit."),
     imo_number__startswith: Optional[str] = Query(None, description="Filter by IMO number prefix."),
@@ -135,7 +136,6 @@ async def search_vessels(
     """
     Search vessels using the Polestar PurpleTrac SISShip endpoint. Requires user authentication.
     """
-    # Check if user is logged in
     # Check if user is logged in (internal endpoint, absolute URL)
     base_url = str(request.base_url)
     async with httpx.AsyncClient() as client:
