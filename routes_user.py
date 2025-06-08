@@ -43,12 +43,182 @@ async def create_user(user: dict):
         "last_login": now_utc,
         "settings": {
             "saved_entities": [],
-            "recent_searches": []
+            "recent_searches": [],
+            "default_notification_settings": {
+                "vessel_notifications": {
+                    "notification_callback_url": "",
+                    "email_settings": {
+                        "email_enabled": False,
+                        "scheduler": {
+                            "schedule_type": 24,
+                            "at_time": "12:00"
+                        },
+                        "additional_recipients": []
+                    },
+                    "filters": {
+                        "zones": {
+                            "active": False,
+                            "event_types": [
+                                "ZONE_ENTRY",
+                                "ZONE_EXIT"
+                            ]
+                        },
+                        "ports": {
+                            "active": False,
+                            "event_types": [
+                                "PORT_AREA_ARRIVAL",
+                                "PORT_ARRIVAL",
+                                "PORT_DEPARTURE",
+                                "PORT_AREA_DEPARTURE"
+                            ]
+                        },
+                        "ais_reporting_gaps": {
+                            "active": False,
+                            "gap_threshold_gte": 24
+                        },
+                        "sts_pairings": {
+                            "active": False,
+                            "duration_hours_gte": 6,
+                            "sts_type": [
+                                "CARGO",
+                                "BUNKERING",
+                                "FISHING",
+                                "UNKNOWN"
+                            ]
+                        },
+                        "positional_discrepancies": {
+                            "active": False,
+                            "duration_hours_gte": 72,
+                            "event_types": [
+                                "SAME_POSITION",
+                                "BOUNDING_BOX",
+                                "CIRCLE",
+                                "MMSI_OUTLIER"
+                            ]
+                        }
+                    }
+                },
+                "zone_port_notifications": {
+                    "notification_callback_url": "",
+                    "email_settings": {
+                        "email_enabled": False,
+                        "scheduler": {
+                            "schedule_type": 24,
+                            "at_time": "12:00"
+                        },
+                        "additional_recipients": []
+                    },
+                    "filters": {
+                        "event_types": [
+                            "PORT_AREA_ARRIVAL",
+                            "PORT_ARRIVAL",
+                            "PORT_DEPARTURE",
+                            "PORT_AREA_DEPARTURE"
+                        ]
+                    }
+                }
+            }
         }
     }
     collection.insert_one(user_doc)
     user_doc["_id"] = str(user_doc.get("_id", ""))
     return JSONResponse(content=user_doc, status_code=201)
+
+# PUT /users/{user_id}/default-notification-settings: set or update default_notification_settings for a user
+@router.put("/users/{user_id}/default-notification-settings")
+async def update_default_notification_settings(user_id: str):
+    collection = get_users_collection()
+    user = collection.find_one({"user_id": user_id.strip()})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    # Ensure settings exists
+    settings = user.get("settings", {})
+    settings["saved_entities"] = settings.get("saved_entities", [])
+    settings["recent_searches"] = settings.get("recent_searches", [])
+    # Set the default_notification_settings
+    settings["default_notification_settings"] = {
+        "vessel_notifications": {
+            "notification_callback_url": "",
+            "email_settings": {
+                "email_enabled": False,
+                "scheduler": {
+                    "schedule_type": 24,
+                    "at_time": "12:00"
+                },
+                "additional_recipients": []
+            },
+            "filters": {
+                "zones": {
+                    "active": False,
+                    "event_types": [
+                        "ZONE_ENTRY",
+                        "ZONE_EXIT"
+                    ]
+                },
+                "ports": {
+                    "active": False,
+                    "event_types": [
+                        "PORT_AREA_ARRIVAL",
+                        "PORT_ARRIVAL",
+                        "PORT_DEPARTURE",
+                        "PORT_AREA_DEPARTURE"
+                    ]
+                },
+                "ais_reporting_gaps": {
+                    "active": False,
+                    "gap_threshold_gte": 24
+                },
+                "sts_pairings": {
+                    "active": False,
+                    "duration_hours_gte": 6,
+                    "sts_type": [
+                        "CARGO",
+                        "BUNKERING",
+                        "FISHING",
+                        "UNKNOWN"
+                    ]
+                },
+                "positional_discrepancies": {
+                    "active": False,
+                    "duration_hours_gte": 72,
+                    "event_types": [
+                        "SAME_POSITION",
+                        "BOUNDING_BOX",
+                        "CIRCLE",
+                        "MMSI_OUTLIER"
+                    ]
+                }
+            }
+        },
+        "zone_port_notifications": {
+            "notification_callback_url": "",
+            "email_settings": {
+                "email_enabled": False,
+                "scheduler": {
+                    "schedule_type": 24,
+                    "at_time": "12:00"
+                },
+                "additional_recipients": []
+            },
+            "filters": {
+                "event_types": [
+                    "PORT_AREA_ARRIVAL",
+                    "PORT_ARRIVAL",
+                    "PORT_DEPARTURE",
+                    "PORT_AREA_DEPARTURE"
+                ]
+            }
+        }
+    }
+    # Update in DB
+    result = collection.update_one(
+        {"user_id": user_id.strip()},
+        {"$set": {"settings": settings}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found during update.")
+    return {"settings": settings}
 
 # GET /users: retrieve all users
 @router.get("/users")
