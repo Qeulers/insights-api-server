@@ -124,93 +124,39 @@ async def create_user(user: dict):
     user_doc["_id"] = str(user_doc.get("_id", ""))
     return JSONResponse(content=user_doc, status_code=201)
 
-# PUT /users/{user_id}/default-notification-settings: set or update default_notification_settings for a user
+# PUT /users/{user_id}/default-notification-settings-auth: update default_notification_settings with login check
+from fastapi import Body
+
 @router.put("/users/{user_id}/default-notification-settings")
-async def update_default_notification_settings(user_id: str):
+async def update_default_notification_settings_auth(user_id: str, request: Request, default_notification_settings: dict = Body(...)):
+    import httpx
+    from fastapi import status
+    # Check if user is logged in (reuse pattern from edit_saved_entities)
+    base_url = str(request.base_url)
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get(f"{base_url}users/{user_id}/is-logged-in")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to check user login: {str(e)}")
+        if resp.status_code == 404:
+            raise HTTPException(status_code=404, detail="User not found.")
+        if resp.status_code != 200:
+            raise HTTPException(status_code=500, detail="Failed to check user login.")
+        is_logged_in = resp.json().get("is_logged_in", False)
+        if not is_logged_in:
+            raise HTTPException(status_code=401, detail="User must be logged in.")
+
     collection = get_users_collection()
     user = collection.find_one({"user_id": user_id.strip()})
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
 
-    # Ensure settings exists
+    # Ensure settings exists with required keys
     settings = user.get("settings", {})
     settings["saved_entities"] = settings.get("saved_entities", [])
     settings["recent_searches"] = settings.get("recent_searches", [])
-    # Set the default_notification_settings
-    settings["default_notification_settings"] = {
-        "vessel_notifications": {
-            "notification_callback_url": "",
-            "email_settings": {
-                "email_enabled": False,
-                "scheduler": {
-                    "schedule_type": 24,
-                    "at_time": "12:00"
-                },
-                "additional_recipients": []
-            },
-            "filters": {
-                "zones": {
-                    "active": False,
-                    "event_types": [
-                        "ZONE_ENTRY",
-                        "ZONE_EXIT"
-                    ]
-                },
-                "ports": {
-                    "active": False,
-                    "event_types": [
-                        "PORT_AREA_ARRIVAL",
-                        "PORT_ARRIVAL",
-                        "PORT_DEPARTURE",
-                        "PORT_AREA_DEPARTURE"
-                    ]
-                },
-                "ais_reporting_gaps": {
-                    "active": False,
-                    "gap_threshold_gte": 24
-                },
-                "sts_pairings": {
-                    "active": False,
-                    "duration_hours_gte": 6,
-                    "sts_type": [
-                        "CARGO",
-                        "BUNKERING",
-                        "FISHING",
-                        "UNKNOWN"
-                    ]
-                },
-                "positional_discrepancies": {
-                    "active": False,
-                    "duration_hours_gte": 72,
-                    "event_types": [
-                        "SAME_POSITION",
-                        "BOUNDING_BOX",
-                        "CIRCLE",
-                        "MMSI_OUTLIER"
-                    ]
-                }
-            }
-        },
-        "zone_port_notifications": {
-            "notification_callback_url": "",
-            "email_settings": {
-                "email_enabled": False,
-                "scheduler": {
-                    "schedule_type": 24,
-                    "at_time": "12:00"
-                },
-                "additional_recipients": []
-            },
-            "filters": {
-                "event_types": [
-                    "PORT_AREA_ARRIVAL",
-                    "PORT_ARRIVAL",
-                    "PORT_DEPARTURE",
-                    "PORT_AREA_DEPARTURE"
-                ]
-            }
-        }
-    }
+    settings["default_notification_settings"] = default_notification_settings
+
     # Update in DB
     result = collection.update_one(
         {"user_id": user_id.strip()},
