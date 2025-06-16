@@ -376,6 +376,19 @@ async def zone_port_traffic(
 
     if all_data:
         try:
+            # Fetch the first page to inspect meta['total_count'] before aggregating
+            first_page_resp = await fetch_page(offset)
+            first_page_json = first_page_resp.json()
+            meta = first_page_json.get('meta', {})
+            total_count = meta.get('total_count')
+            if total_count is not None and total_count > 30000:
+                return JSONResponse(
+                    status_code=413,
+                    content={
+                        "error": f"The requested data set is too large to process (total_count: {total_count}, max allowed: 30000). Please narrow your query parameters."
+                    }
+                )
+            # If OK, proceed with normal pagination
             meta, all_events, extra_info = await paginate_all_data(
                 fetch_page, limit, offset, "total_count", lambda p: p.get("data", {}).get("events", [])
             )
