@@ -12,6 +12,47 @@ import os
 EXTERNAL_BASE_URL = "https://api.polestar-production.com/zone-port-insights"
 router = APIRouter(prefix="/zone-port-insights", tags=["Zone Port Insights"])
 
+@router.get("/polygons/{zone_id}", response_class=JSONResponse)
+def get_zone_polygon(zone_id: str):
+    """
+    Returns the WKT polygon for a zone by zone_id.
+    Handles both string and BSON UUID storage.
+    """
+    from fastapi import status
+    from bson import ObjectId
+    import uuid
+    load_dotenv()
+    mongo_url = os.getenv("MONGO_URL")
+    db_name = os.getenv("MONGO_DB_NAME_ZONES")
+    collection_name = os.getenv("MONGO_COLLECTION_NAME_ZONES_POLYGONS")
+    if not all([mongo_url, db_name, collection_name]):
+        return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content={"detail": "MongoDB configuration missing in .env"})
+    try:
+        client = MongoClient(mongo_url, serverSelectionTimeoutMS=5000)
+        db = client[db_name]
+        collection = db[collection_name]
+        import uuid
+        from bson.binary import Binary
+        try:
+            uuid_val = uuid.UUID(zone_id)
+        except Exception:
+            return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content={"detail": f"Invalid zone_id: '{zone_id}' is not a valid UUID"})
+        result = collection.find_one({"zone_id": Binary.from_uuid(uuid_val)})
+        if not result:
+            return JSONResponse(status_code=status.HTTP_404_NOT_FOUND, content={"detail": f"Zone with id '{zone_id}' not found"})
+        wkt = result.get("geometry_wkt")
+        if not wkt:
+            return JSONResponse(status_code=status.HTTP_404_NOT_FOUND, content={"detail": f"geometry_wkt not found for zone '{zone_id}'"})
+        return JSONResponse(content={"zone_id": zone_id, "geometry_wkt": wkt}, status_code=200)
+    except Exception as e:
+        return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content={"detail": str(e)})
+    finally:
+        try:
+            client.close()
+        except Exception:
+            pass
+
+
 def flatten_dict(d, parent_key='', sep='_'):
     items = []
     for k, v in d.items():
