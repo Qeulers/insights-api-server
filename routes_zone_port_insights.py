@@ -13,15 +13,31 @@ EXTERNAL_BASE_URL = "https://api.polestar-production.com/zone-port-insights"
 router = APIRouter(prefix="/zone-port-insights", tags=["Zone Port Insights"])
 
 @router.get("/polygons/{zone_id}", response_class=JSONResponse)
-def get_zone_polygon(zone_id: str):
+def get_zone_polygon(request: Request, zone_id: str, user_id: str = Query(..., description="User ID for authentication")):
     """
-    Returns the WKT polygon for a zone by zone_id.
-    Handles both string and BSON UUID storage.
+    Returns the WKT polygon for a zone by zone_id. Requires user authentication.
     """
+    import httpx
     from fastapi import status
     from bson import ObjectId
     import uuid
+    from bson.binary import Binary
     load_dotenv()
+    # User authentication check (same as get_zone_by_id)
+    base_url = str(request.base_url)
+    try:
+        with httpx.Client() as client:
+            resp = client.get(f"{base_url}users/{user_id}/is-logged-in")
+        if resp.status_code == 404:
+            return JSONResponse(status_code=404, content={"detail": "User not found."})
+        elif resp.status_code != 200:
+            return JSONResponse(status_code=500, content={"detail": "Failed to check user login."})
+        is_logged_in = resp.json().get("is_logged_in", False)
+        if not is_logged_in:
+            return JSONResponse(status_code=403, content={"detail": "User not logged in."})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"detail": f"Failed to check user login: {str(e)}"})
+    # Proceed to DB lookup if authenticated
     mongo_url = os.getenv("MONGO_URL")
     db_name = os.getenv("MONGO_DB_NAME_ZONES")
     collection_name = os.getenv("MONGO_COLLECTION_NAME_ZONES_POLYGONS")
@@ -31,8 +47,6 @@ def get_zone_polygon(zone_id: str):
         client = MongoClient(mongo_url, serverSelectionTimeoutMS=5000)
         db = client[db_name]
         collection = db[collection_name]
-        import uuid
-        from bson.binary import Binary
         try:
             uuid_val = uuid.UUID(zone_id)
         except Exception:
