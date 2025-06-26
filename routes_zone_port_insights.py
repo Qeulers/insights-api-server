@@ -54,10 +54,18 @@ def get_zone_polygon(request: Request, zone_id: str, user_id: str = Query(..., d
         result = collection.find_one({"zone_id": Binary.from_uuid(uuid_val)})
         if not result:
             return JSONResponse(status_code=status.HTTP_404_NOT_FOUND, content={"detail": f"Zone with id '{zone_id}' not found"})
-        wkt = result.get("geometry_wkt")
-        if not wkt:
-            return JSONResponse(status_code=status.HTTP_404_NOT_FOUND, content={"detail": f"geometry_wkt not found for zone '{zone_id}'"})
-        return JSONResponse(content={"zone_id": zone_id, "geometry_wkt": wkt}, status_code=200)
+        geometry = result.get("geometry")
+        bbox = result.get("bbox")
+        if not geometry:
+            return JSONResponse(status_code=status.HTTP_404_NOT_FOUND, content={"detail": f"geometry not found for zone '{zone_id}'"})
+        if not bbox:
+            return JSONResponse(status_code=status.HTTP_404_NOT_FOUND, content={"detail": f"bbox not found for zone '{zone_id}'"})
+        return JSONResponse(content={
+            "zone_id": zone_id,
+            "geometry": geometry,
+            "bbox": bbox
+        }, status_code=200)
+
     except Exception as e:
         return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content={"detail": str(e)})
     finally:
