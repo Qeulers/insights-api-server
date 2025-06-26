@@ -51,7 +51,8 @@ def get_zone_polygon(request: Request, zone_id: str, user_id: str = Query(..., d
             uuid_val = uuid.UUID(zone_id)
         except Exception:
             return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content={"detail": f"Invalid zone_id: '{zone_id}' is not a valid UUID"})
-        result = collection.find_one({"zone_id": Binary.from_uuid(uuid_val)})
+        # Always search by string zone_id, not binary
+        result = collection.find_one({"zone_id": zone_id})
         if not result:
             return JSONResponse(status_code=status.HTTP_404_NOT_FOUND, content={"detail": f"Zone with id '{zone_id}' not found"})
         geometry = result.get("geometry")
