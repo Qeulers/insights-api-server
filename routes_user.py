@@ -302,6 +302,77 @@ async def edit_saved_entities(user_id: str, request: Request):
 
     return {"saved_entities": saved_entities}
 
+# PUT /users/{user_id}/saved-entities/{id}/notifications: update subscription_id for a saved entity
+@router.put("/users/{user_id}/saved-entities/{id}/notifications")
+async def update_saved_entity_notifications(user_id: str, id: str, request: Request):
+    import httpx
+    from fastapi import Body
+    
+    # Check if user is logged in
+    base_url = str(request.base_url)
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get(f"{base_url}users/{user_id}/is-logged-in")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to check user login: {str(e)}")
+        if resp.status_code == 404:
+            raise HTTPException(status_code=404, detail="User not found.")
+        if resp.status_code != 200 or not resp.json().get("is_logged_in", False):
+            raise HTTPException(status_code=401, detail="User is not logged in.")
+    
+    collection = get_users_collection()
+    body = await request.json()
+    
+    # Validate request body
+    action = body.get("action")
+    subscription_id = body.get("subscription_id")
+    
+    if not action or action not in ["add", "remove"]:
+        raise HTTPException(status_code=400, detail="action must be 'add' or 'remove'")
+    
+    if not subscription_id:
+        raise HTTPException(status_code=400, detail="subscription_id is required")
+    
+    # Find the user
+    user = collection.find_one({"user_id": user_id.strip()})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    
+    # Ensure settings and saved_entities exist
+    settings = user.get("settings", {})
+    saved_entities = settings.get("saved_entities", [])
+    
+    # Find the saved entity with the given id
+    entity_found = False
+    for entity in saved_entities:
+        if entity.get("id") == id:
+            entity_found = True
+            
+            if action == "add":
+                # Add or update subscription_id
+                entity["subscription_id"] = subscription_id
+            elif action == "remove":
+                # Set subscription_id to empty string if it exists
+                if "subscription_id" in entity:
+                    entity["subscription_id"] = ""
+            break
+    
+    if not entity_found:
+        raise HTTPException(status_code=404, detail=f"Saved entity with id '{id}' not found.")
+    
+    # Update user document
+    result = collection.update_one(
+        {"user_id": user_id.strip()},
+        {"$set": {"settings.saved_entities": saved_entities}}
+    )
+    
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found during update.")
+    
+    # Return the updated saved entity
+    updated_entity = next(entity for entity in saved_entities if entity.get("id") == id)
+    return {"message": f"Subscription notifications {action}ed successfully", "saved_entity": updated_entity}
+
 # GET /users/{user_id}/is-logged-in: check if user is logged in
 @router.get("/users/{user_id}/is-logged-in")
 async def is_user_logged_in(user_id: str):
