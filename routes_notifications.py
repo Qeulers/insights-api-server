@@ -66,6 +66,19 @@ async def handle_zone_port_webhook(notification_data: Dict[str, Any] = Body(...)
     try:
         collection = get_zone_port_notifications_collection()
         notification_data["received_at"] = datetime.utcnow()
+        # Extract user_id and auto_screen from custom_reference
+        custom_ref = notification_data.get("custom_reference")
+        if custom_ref and "|" in custom_ref:
+            try:
+                user_id_part, auto_screen_part = [x.strip() for x in custom_ref.split("|", 1)]
+                notification_data["user_id"] = user_id_part
+                notification_data["auto_screen"] = auto_screen_part.upper() == "TRUE"
+            except Exception:
+                notification_data["user_id"] = None
+                notification_data["auto_screen"] = None
+        else:
+            notification_data["user_id"] = None
+            notification_data["auto_screen"] = None
         result = collection.insert_one(notification_data)
         return {
             "status": "success",
@@ -83,6 +96,15 @@ async def handle_vessel_webhook(notification_data: Dict[str, Any] = Body(...)):
     try:
         collection = get_vessel_notifications_collection()
         notification_data["received_at"] = datetime.utcnow()
+        # Extract user_id and auto_screen from custom_reference
+        custom_ref = notification_data.get("custom_reference")
+        if custom_ref:
+            try:
+                notification_data["user_id"] = custom_ref
+            except Exception:
+                notification_data["user_id"] = None
+        else:
+            notification_data["user_id"] = None
         result = collection.insert_one(notification_data)
         return {
             "status": "success",
