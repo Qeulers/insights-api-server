@@ -29,17 +29,43 @@ async def check_user_logged_in(user_id: str = Query(..., description="User ID fo
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to check user login: {str(e)}")
 
-# Global MongoDB client - reuse connections
+# Global MongoDB client - reuse connections with safety measures
 _mongo_client = None
+_client_lock = None
 
 def get_mongo_client():
-    global _mongo_client
-    if _mongo_client is None:
-        load_dotenv()
-        mongo_url = os.getenv("MONGO_URL")
-        if not mongo_url:
-            raise HTTPException(status_code=500, detail="MongoDB URL is missing.")
-        _mongo_client = MongoClient(mongo_url, maxPoolSize=50, minPoolSize=5)
+    global _mongo_client, _client_lock
+    
+    # Initialize lock on first call
+    if _client_lock is None:
+        import threading
+        _client_lock = threading.Lock()
+    
+    with _client_lock:
+        if _mongo_client is None:
+            try:
+                load_dotenv()
+                mongo_url = os.getenv("MONGO_URL")
+                if not mongo_url:
+                    raise HTTPException(status_code=500, detail="MongoDB URL is missing.")
+                
+                # Use safer connection settings for Python 3.13
+                _mongo_client = MongoClient(
+                    mongo_url, 
+                    maxPoolSize=20,  # Reduced pool size for stability
+                    minPoolSize=2,
+                    maxIdleTimeMS=30000,
+                    serverSelectionTimeoutMS=5000,
+                    connectTimeoutMS=10000,
+                    socketTimeoutMS=20000,
+                    retryWrites=False  # Disable for stability
+                )
+                # Test connection
+                _mongo_client.admin.command('ping')
+            except Exception as e:
+                _mongo_client = None
+                raise HTTPException(status_code=500, detail=f"MongoDB connection failed: {str(e)}")
+    
     return _mongo_client
 
 def get_zone_port_notifications_collection():
