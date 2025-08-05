@@ -137,7 +137,7 @@ class SubscriptionIDs(BaseModel):
 async def get_zone_port_notifications(
     subscription_ids: SubscriptionIDs,
     user_id: str = Depends(check_user_logged_in),
-    limit: int = Query(100, ge=1, le=1000, description="Maximum number of notifications to return")
+    limit: int = Query(500, ge=1, le=1000, description="Maximum number of notifications to return")
 ):
     """
     Retrieve zone/port notifications for the given list of subscription IDs.
@@ -174,7 +174,7 @@ async def get_zone_port_notifications(
 async def get_vessel_notifications(
     subscription_ids: SubscriptionIDs,
     user_id: str = Depends(check_user_logged_in),
-    limit: int = Query(100, ge=1, le=1000, description="Maximum number of notifications to return")
+    limit: int = Query(500, ge=1, le=1000, description="Maximum number of notifications to return")
 ):
     """
     Retrieve vessel notifications for the given list of subscription IDs.
