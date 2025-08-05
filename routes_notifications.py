@@ -29,35 +29,46 @@ async def check_user_logged_in(user_id: str = Query(..., description="User ID fo
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to check user login: {str(e)}")
 
+# Global MongoDB client - reuse connections
+_mongo_client = None
+
+def get_mongo_client():
+    global _mongo_client
+    if _mongo_client is None:
+        load_dotenv()
+        mongo_url = os.getenv("MONGO_URL")
+        if not mongo_url:
+            raise HTTPException(status_code=500, detail="MongoDB URL is missing.")
+        _mongo_client = MongoClient(mongo_url, maxPoolSize=50, minPoolSize=5)
+    return _mongo_client
+
 def get_zone_port_notifications_collection():
     load_dotenv()
-    mongo_url = os.getenv("MONGO_URL")
     db_name = os.getenv("MONGO_DB_NAME_NOTIFICATIONS")
     collection_name = os.getenv("MONGO_COLLECTION_NAME_ZONE_PORT_NOTIFICATIONS")
     
-    if not all([mongo_url, db_name, collection_name]):
+    if not all([db_name, collection_name]):
         raise HTTPException(
             status_code=500,
             detail="MongoDB configuration for zone port notifications is missing."
         )
     
-    client = MongoClient(mongo_url)
+    client = get_mongo_client()
     db = client[db_name]
     return db[collection_name]
 
 def get_vessel_notifications_collection():
     load_dotenv()
-    mongo_url = os.getenv("MONGO_URL")
     db_name = os.getenv("MONGO_DB_NAME_NOTIFICATIONS")
     collection_name = os.getenv("MONGO_COLLECTION_NAME_VESSEL_NOTIFICATIONS")
     
-    if not all([mongo_url, db_name, collection_name]):
+    if not all([db_name, collection_name]):
         raise HTTPException(
             status_code=500,
             detail="MongoDB configuration for vessel notifications is missing."
         )
     
-    client = MongoClient(mongo_url)
+    client = get_mongo_client()
     db = client[db_name]
     return db[collection_name]
 
@@ -125,10 +136,11 @@ class SubscriptionIDs(BaseModel):
 @router.post("/zone-port-notifications")
 async def get_zone_port_notifications(
     subscription_ids: SubscriptionIDs,
-    user_id: str = Depends(check_user_logged_in)
+    user_id: str = Depends(check_user_logged_in),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of notifications to return")
 ):
     """
-    Retrieve all zone/port notifications for the given list of subscription IDs.
+    Retrieve zone/port notifications for the given list of subscription IDs.
     """
     try:
         collection = get_zone_port_notifications_collection()
@@ -136,7 +148,7 @@ async def get_zone_port_notifications(
         # Query for documents where subscription_id is in the provided list
         cursor = collection.find({
             "subscription_id": {"$in": subscription_ids.subscription_ids}
-        })
+        }).sort("received_at", -1).limit(limit)
         
         # Convert cursor to list and format the response
         notifications = []
@@ -161,10 +173,11 @@ async def get_zone_port_notifications(
 @router.post("/vessel-notifications")
 async def get_vessel_notifications(
     subscription_ids: SubscriptionIDs,
-    user_id: str = Depends(check_user_logged_in)
+    user_id: str = Depends(check_user_logged_in),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of notifications to return")
 ):
     """
-    Retrieve all vessel notifications for the given list of subscription IDs.
+    Retrieve vessel notifications for the given list of subscription IDs.
     """
     try:
         collection = get_vessel_notifications_collection()
@@ -172,7 +185,7 @@ async def get_vessel_notifications(
         # Query for documents where subscription_id is in the provided list
         cursor = collection.find({
             "subscription_id": {"$in": subscription_ids.subscription_ids}
-        })
+        }).sort("received_at", -1).limit(limit)
         
         # Convert cursor to list and format the response
         notifications = []
