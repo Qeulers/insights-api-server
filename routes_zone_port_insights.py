@@ -293,22 +293,25 @@ async def bulk_get_zones_by_id(
     if not all([mongo_url, db_name, collection_name]):
         raise HTTPException(status_code=500, detail="MongoDB configuration is missing.")
     client = MongoClient(mongo_url)
-    db = client[db_name]
-    collection = db[collection_name]
-    found_zones = []
-    seen_ids = set()
-    for zid in zone_ids:
-        zid_stripped = zid.strip()
-        if zid_stripped in seen_ids:
-            continue  # avoid duplicate queries
-        seen_ids.add(zid_stripped)
-        zone = collection.find_one({"zone_id": zid_stripped})
-        if not zone:
-            zone = collection.find_one({"zone_id": {"$regex": f"^{zid_stripped}$", "$options": "i"}})
-        if zone:
-            zone["_id"] = str(zone["_id"])
-            found_zones.append(zone)
-    return found_zones
+    try:
+        db = client[db_name]
+        collection = db[collection_name]
+        found_zones = []
+        seen_ids = set()
+        for zid in zone_ids:
+            zid_stripped = zid.strip()
+            if zid_stripped in seen_ids:
+                continue  # avoid duplicate queries
+            seen_ids.add(zid_stripped)
+            zone = collection.find_one({"zone_id": zid_stripped})
+            if not zone:
+                zone = collection.find_one({"zone_id": {"$regex": f"^{zid_stripped}$", "$options": "i"}})
+            if zone:
+                zone["_id"] = str(zone["_id"])
+                found_zones.append(zone)
+        return found_zones
+    finally:
+        client.close()
 
 # /v1/zone-and-port-traffic/{id_type}/{id} endpoint
 @router.get("/zone-and-port-traffic/{id_type}/{id}")

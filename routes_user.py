@@ -8,14 +8,26 @@ import os
 router = APIRouter()
 
 # Helper to get MongoDB collection for users
+# Global MongoDB client for users - reuse connections
+_users_mongo_client = None
+
+def get_users_mongo_client():
+    global _users_mongo_client
+    if _users_mongo_client is None:
+        load_dotenv()
+        mongo_url = os.getenv("MONGO_URL")
+        if not mongo_url:
+            raise HTTPException(status_code=500, detail="MongoDB URL is missing.")
+        _users_mongo_client = MongoClient(mongo_url, maxPoolSize=50, minPoolSize=5)
+    return _users_mongo_client
+
 def get_users_collection():
     load_dotenv()
-    mongo_url = os.getenv("MONGO_URL")
     db_name = os.getenv("MONGO_DB_NAME_USERS")
     collection_name = os.getenv("MONGO_COLLECTION_NAME_USERS")
-    if not all([mongo_url, db_name, collection_name]):
+    if not all([db_name, collection_name]):
         raise HTTPException(status_code=500, detail="MongoDB configuration is missing.")
-    client = MongoClient(mongo_url)
+    client = get_users_mongo_client()
     db = client[db_name]
     return db[collection_name]
 
