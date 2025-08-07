@@ -1,5 +1,6 @@
 import os
 import httpx
+import logging
 from fastapi import APIRouter, HTTPException, Request, Body, Depends, Query, BackgroundTasks
 from fastapi.responses import JSONResponse
 from pymongo import MongoClient
@@ -9,6 +10,9 @@ from typing import Dict, Any, Optional, List
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
+
+logger = logging.getLogger("notifications")
+logging.basicConfig(level=logging.INFO)
 
 async def check_user_logged_in(user_id: str = Query(..., description="User ID for authentication"), request: Request = None):
     """Dependency to check if user is logged in."""
@@ -83,71 +87,74 @@ def get_zone_port_notifications_collection():
     db = client[db_name]
     return db[collection_name]
 
-import logging
 
 async def screen_vessel_and_update_notification(notification_data: Dict[str, Any], inserted_id, collection):
     import asyncio
     load_dotenv()
     logger = logging.getLogger("screen_vessel_and_update_notification")
-    logger.info(f"Starting screening for inserted_id={inserted_id}")
+    logger.info(f"[screening] Starting screening for inserted_id={inserted_id}")
     PTE_BASE_URL = os.getenv("PTE_BASE_URL")
     PTE_API_KEY = os.getenv("PTE_API_KEY")
     PTE_API_USERNAME = os.getenv("PTE_API_USERNAME")
+    logger.info(f"[screening] PTE_BASE_URL: {PTE_BASE_URL}, PTE_API_KEY: {'set' if PTE_API_KEY else 'not set'}, PTE_API_USERNAME: {PTE_API_USERNAME}")
     if not (PTE_BASE_URL and PTE_API_KEY and PTE_API_USERNAME):
-        logger.error("Missing PTE API config. Skipping screening.")
+        logger.error("[screening] Missing PTE API config. Skipping screening.")
         return
     try:
-        imo_number = str(notification_data["notification"]["vessel_information"]["imo"])
-        logger.info(f"Extracted IMO number: {imo_number}")
+        logger.info(f"[screening] notification_data: {notification_data}")
+        imo_number = str(notification_data.get("notification", {}).get("vessel_information", {}).get("imo") or notification_data.get("vessel_information", {}).get("imo"))
+        logger.info(f"[screening] Extracted IMO number: {imo_number}")
     except Exception as e:
-        logger.error(f"Invalid payload, could not extract IMO: {e}")
+        logger.error(f"[screening] Invalid payload, could not extract IMO: {e}")
         return
     registration_url = f"{PTE_BASE_URL}/registration?api_key={PTE_API_KEY}&username={PTE_API_USERNAME}"
     registration_payload = {"registered_name": imo_number}
     transaction_id = None
-
+    logger.info(f"[screening] Registration URL: {registration_url}")
+    logger.info(f"[screening] Registration payload: {registration_payload}")
     # Keep the client open for registration and polling
     async with httpx.AsyncClient(timeout=30) as client:
         try:
-            logger.info(f"Registering vessel with payload: {registration_payload}")
+            logger.info(f"[screening] Registering vessel...")
             reg_resp = await client.post(registration_url, json=registration_payload)
             reg_resp.raise_for_status()
             reg_data = reg_resp.json()
             transaction_id = reg_data.get("transaction_id")
-            logger.info(f"Registration successful, transaction_id: {transaction_id}")
+            logger.info(f"[screening] Registration successful, transaction_id: {transaction_id}")
         except Exception as e:
-            logger.error(f"Registration failed: {e}")
+            logger.error(f"[screening] Registration failed: {e}")
             return
         if not transaction_id:
-            logger.error("No transaction_id returned from registration. Skipping.")
+            logger.error("[screening] No transaction_id returned from registration. Skipping.")
             return
         poll_url = f"{PTE_BASE_URL}/transaction?id={transaction_id}&api_key={PTE_API_KEY}&username={PTE_API_USERNAME}"
         screening_status = "PENDING"
         poll_resp_obj = None
+        logger.info(f"[screening] Polling for screening results at: {poll_url}")
         for poll_count in range(40):  # ~2min max
             try:
                 poll_resp = await client.get(poll_url)
                 poll_resp.raise_for_status()
                 poll_data = poll_resp.json()
                 objects = poll_data.get("objects", [])
-                logger.info(f"Polling attempt {poll_count+1}: objects={bool(objects)}, screening_status={screening_status}")
+                logger.info(f"[screening] Polling attempt {poll_count+1}: objects={bool(objects)}, screening_status={screening_status}")
                 if objects:
                     poll_resp_obj = objects[0]
                     screening_status = poll_resp_obj.get("screening_status", "PENDING")
-                    logger.info(f"Screening status: {screening_status}")
+                    logger.info(f"[screening] Screening status: {screening_status}")
                     if screening_status != "PENDING":
                         break
             except Exception as e:
-                logger.warning(f"Polling error (attempt {poll_count+1}): {e}")
+                logger.warning(f"[screening] Polling error (attempt {poll_count+1}): {e}")
                 await asyncio.sleep(3)
                 continue
             await asyncio.sleep(3)
         if not poll_resp_obj or screening_status == "PENDING":
-            logger.error("Polling timed out or failed to complete screening.")
+            logger.error("[screening] Polling timed out or failed to complete screening.")
             return
         try:
             screen_results = poll_resp_obj.get("screen_results", [])
-            logger.info(f"Extracted screen_results: {screen_results}")
+            logger.info(f"[screening] Extracted screen_results: {screen_results}")
             def get_status(check):
                 for sr in screen_results:
                     if sr.get("check") == check:
@@ -161,11 +168,11 @@ async def screen_vessel_and_update_notification(notification_data: Dict[str, Any
                 "ship_movement": get_status("SHIP_MOVE_HIST"),
                 "psc": get_status("PSC_HISTORY"),
             }
-            logger.info(f"Updating notification document {inserted_id} with screening_results: {screening_results}")
+            logger.info(f"[screening] Updating notification document {inserted_id} with screening_results: {screening_results}")
             update_result = collection.update_one({"_id": inserted_id}, {"$set": {"screening_results": screening_results}})
-            logger.info(f"MongoDB update result: matched_count={update_result.matched_count}, modified_count={update_result.modified_count}")
+            logger.info(f"[screening] MongoDB update result: matched_count={update_result.matched_count}, modified_count={update_result.modified_count}")
         except Exception as e:
-            logger.error(f"Exception during screening result extraction or MongoDB update: {e}", exc_info=True)
+            logger.error(f"[screening] Exception during screening result extraction or MongoDB update: {e}", exc_info=True)
             return
 
 def get_vessel_notifications_collection():
@@ -185,33 +192,48 @@ def get_vessel_notifications_collection():
 
 @router.post("/webhook/zone-port-event")
 async def handle_zone_port_webhook(notification_data: Dict[str, Any] = Body(...), background_tasks: BackgroundTasks = None):
+    logger.info("Received zone-port webhook event.")
     try:
         collection = get_zone_port_notifications_collection()
+        logger.info("Obtained zone port notifications collection.")
         notification_data["received_at"] = datetime.utcnow()
+        logger.info(f"Added received_at timestamp: {notification_data['received_at']}")
         # Extract user_id and auto_screen from custom_reference
         custom_ref = notification_data.get("custom_reference")
+        logger.info(f"custom_reference: {custom_ref}")
         if custom_ref and "|" in custom_ref:
             try:
                 user_id_part, auto_screen_part = [x.strip() for x in custom_ref.split("|", 1)]
                 notification_data["user_id"] = user_id_part
                 notification_data["auto_screen"] = auto_screen_part.upper() == "TRUE"
-            except Exception:
+                logger.info(f"Parsed user_id: {user_id_part}, auto_screen: {notification_data['auto_screen']}")
+            except Exception as e:
+                logger.error(f"Failed to parse custom_reference: {e}")
                 notification_data["user_id"] = None
                 notification_data["auto_screen"] = None
         else:
             notification_data["user_id"] = None
             notification_data["auto_screen"] = None
+            logger.info("No valid custom_reference found; set user_id and auto_screen to None.")
+        logger.info(f"Notification data to insert: {notification_data}")
         result = collection.insert_one(notification_data)
+        logger.info(f"Inserted notification with _id: {result.inserted_id}")
         # Launch screening in background if auto_screen is true
         if notification_data.get("auto_screen"):
             if background_tasks is not None:
+                logger.info(f"auto_screen is True, adding background screening task for _id: {result.inserted_id}")
                 background_tasks.add_task(screen_vessel_and_update_notification, notification_data, result.inserted_id, collection)
+            else:
+                logger.warning("auto_screen is True but background_tasks is None; screening not started.")
+        else:
+            logger.info("auto_screen is False or not set; skipping background screening.")
         return {
             "status": "success",
             "message": "Notification stored successfully",
             "notification_id": str(result.inserted_id)
         }
     except Exception as e:
+        logger.error(f"Failed to process notification: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"Failed to process notification: {str(e)}"
