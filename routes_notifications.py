@@ -250,19 +250,18 @@ class SubscriptionIDs(BaseModel):
 
 @router.post("/zone-port-notifications")
 async def get_zone_port_notifications(
-    subscription_ids: SubscriptionIDs,
     user_id: str = Depends(check_user_logged_in),
     limit: int = Query(500, ge=1, le=1000, description="Maximum number of notifications to return")
 ):
     """
-    Retrieve zone/port notifications for the given list of subscription IDs.
+    Retrieve all zone/port notifications for the user with the given user_id.
     """
     try:
         collection = get_zone_port_notifications_collection()
         
-        # Query for documents where subscription_id is in the provided list
+        # Query for documents where user_id matches the provided user_id
         cursor = collection.find({
-            "subscription_id": {"$in": subscription_ids.subscription_ids}
+            "user_id": user_id
         }).sort("received_at", -1).limit(limit)
         
         # Convert cursor to list and format the response
@@ -287,19 +286,18 @@ async def get_zone_port_notifications(
 
 @router.post("/vessel-notifications")
 async def get_vessel_notifications(
-    subscription_ids: SubscriptionIDs,
     user_id: str = Depends(check_user_logged_in),
     limit: int = Query(500, ge=1, le=1000, description="Maximum number of notifications to return")
 ):
     """
-    Retrieve vessel notifications for the given list of subscription IDs.
+    Retrieve all vessel notifications for the user with the given user_id.
     """
     try:
         collection = get_vessel_notifications_collection()
         
-        # Query for documents where subscription_id is in the provided list
+        # Query for documents where user_id matches the provided user_id
         cursor = collection.find({
-            "subscription_id": {"$in": subscription_ids.subscription_ids}
+            "user_id": user_id
         }).sort("received_at", -1).limit(limit)
         
         # Convert cursor to list and format the response
