@@ -248,7 +248,7 @@ class SubscriptionIDs(BaseModel):
     subscription_ids: List[str]
 
 
-@router.post("/zone-port-notifications")
+@router.get("/zone-port-notifications")
 async def get_zone_port_notifications(
     user_id: str = Depends(check_user_logged_in),
     limit: int = Query(500, ge=1, le=1000, description="Maximum number of notifications to return")
@@ -284,7 +284,7 @@ async def get_zone_port_notifications(
         )
 
 
-@router.post("/vessel-notifications")
+@router.get("/vessel-notifications")
 async def get_vessel_notifications(
     user_id: str = Depends(check_user_logged_in),
     limit: int = Query(500, ge=1, le=1000, description="Maximum number of notifications to return")
