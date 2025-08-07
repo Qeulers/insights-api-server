@@ -1,6 +1,6 @@
 import os
 import httpx
-from fastapi import APIRouter, HTTPException, Request, Body, Depends, Query
+from fastapi import APIRouter, HTTPException, Request, Body, Depends, Query, BackgroundTasks
 from fastapi.responses import JSONResponse
 from pymongo import MongoClient
 from dotenv import load_dotenv
@@ -83,6 +83,75 @@ def get_zone_port_notifications_collection():
     db = client[db_name]
     return db[collection_name]
 
+async def screen_vessel_and_update_notification(notification_data: Dict[str, Any], inserted_id, collection):
+    import asyncio
+    load_dotenv()
+    PTE_BASE_URL = os.getenv("PTE_BASE_URL")
+    PTE_API_KEY = os.getenv("PTE_API_KEY")
+    PTE_API_USERNAME = os.getenv("PTE_API_USERNAME")
+    if not (PTE_BASE_URL and PTE_API_KEY and PTE_API_USERNAME):
+        return  # Missing config, skip
+    # Extract IMO number
+    try:
+        imo_number = str(notification_data["notification"]["vessel_information"]["imo"])
+    except Exception:
+        return  # Invalid payload, skip
+    # 1. POST to /registration
+    registration_url = f"{PTE_BASE_URL}/registration?api_key={PTE_API_KEY}&username={PTE_API_USERNAME}"
+    registration_payload = {"registered_name": imo_number}
+    transaction_id = None
+    async with httpx.AsyncClient(timeout=30) as client:
+        try:
+            reg_resp = await client.post(registration_url, json=registration_payload)
+            reg_resp.raise_for_status()
+            reg_data = reg_resp.json()
+            transaction_id = reg_data.get("transaction_id")
+        except Exception:
+            return  # Registration failed
+    if not transaction_id:
+        return
+    # 2. Poll /transaction every 3s until screening_status != "PENDING"
+    poll_url = f"{PTE_BASE_URL}/transaction?id={transaction_id}&api_key={PTE_API_KEY}&username={PTE_API_USERNAME}"
+    screening_status = "PENDING"
+    poll_resp_obj = None
+    for _ in range(40):  # ~2min max
+        try:
+            poll_resp = await client.get(poll_url)
+            poll_resp.raise_for_status()
+            poll_data = poll_resp.json()
+            objects = poll_data.get("objects", [])
+            if objects:
+                poll_resp_obj = objects[0]
+                screening_status = poll_resp_obj.get("screening_status", "PENDING")
+                if screening_status != "PENDING":
+                    break
+        except Exception:
+            await asyncio.sleep(3)
+            continue
+        await asyncio.sleep(3)
+    if not poll_resp_obj or screening_status == "PENDING":
+        return  # Timed out or failed
+    # 3. Extract screening results
+    try:
+        screen_results = poll_resp_obj.get("screen_results", [])
+        def get_status(check):
+            for sr in screen_results:
+                if sr.get("check") == check:
+                    return sr.get("status")
+            return None
+        screening_results = {
+            "transaction_id": poll_resp_obj.get("id"),
+            "overall_severity": poll_resp_obj.get("overall_severity"),
+            "company_sanctions": get_status("COMPANY_SANCTIONS"),
+            "ship_sanctions": get_status("SANCTIONS"),
+            "ship_movement": get_status("SHIP_MOVE_HIST"),
+            "psc": get_status("PSC_HISTORY"),
+        }
+        # 4. Update the notification document
+        collection.update_one({"_id": inserted_id}, {"$set": {"screening_results": screening_results}})
+    except Exception:
+        return
+
 def get_vessel_notifications_collection():
     load_dotenv()
     db_name = os.getenv("MONGO_DB_NAME_NOTIFICATIONS")
@@ -99,7 +168,7 @@ def get_vessel_notifications_collection():
     return db[collection_name]
 
 @router.post("/webhook/zone-port-event")
-async def handle_zone_port_webhook(notification_data: Dict[str, Any] = Body(...)):
+async def handle_zone_port_webhook(notification_data: Dict[str, Any] = Body(...), background_tasks: BackgroundTasks = None):
     try:
         collection = get_zone_port_notifications_collection()
         notification_data["received_at"] = datetime.utcnow()
@@ -117,6 +186,10 @@ async def handle_zone_port_webhook(notification_data: Dict[str, Any] = Body(...)
             notification_data["user_id"] = None
             notification_data["auto_screen"] = None
         result = collection.insert_one(notification_data)
+        # Launch screening in background if auto_screen is true
+        if notification_data.get("auto_screen"):
+            if background_tasks is not None:
+                background_tasks.add_task(screen_vessel_and_update_notification, notification_data, result.inserted_id, collection)
         return {
             "status": "success",
             "message": "Notification stored successfully",
