@@ -154,8 +154,8 @@ async def screen_vessel_and_update_notification(notification_data: Dict[str, Any
                         return sr.get("status")
                 return None
             screening_results = {
-                "transaction_id": poll_resp_obj.get("id"),
-                "overall_severity": poll_resp_obj.get("overall_severity"),
+                "transaction_id": transaction_id,
+                "overall_severity": screening_status,
                 "company_sanctions": get_status("COMPANY_SANCTIONS"),
                 "ship_sanctions": get_status("SANCTIONS"),
                 "ship_movement": get_status("SHIP_MOVE_HIST"),
