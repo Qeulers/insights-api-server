@@ -83,57 +83,73 @@ def get_zone_port_notifications_collection():
     db = client[db_name]
     return db[collection_name]
 
+import logging
+
 async def screen_vessel_and_update_notification(notification_data: Dict[str, Any], inserted_id, collection):
     import asyncio
     load_dotenv()
+    logger = logging.getLogger("screen_vessel_and_update_notification")
+    logger.info(f"Starting screening for inserted_id={inserted_id}")
     PTE_BASE_URL = os.getenv("PTE_BASE_URL")
     PTE_API_KEY = os.getenv("PTE_API_KEY")
     PTE_API_USERNAME = os.getenv("PTE_API_USERNAME")
     if not (PTE_BASE_URL and PTE_API_KEY and PTE_API_USERNAME):
-        return  # Missing config, skip
+        logger.error("Missing PTE API config. Skipping screening.")
+        return
     # Extract IMO number
     try:
         imo_number = str(notification_data["notification"]["vessel_information"]["imo"])
-    except Exception:
-        return  # Invalid payload, skip
+        logger.info(f"Extracted IMO number: {imo_number}")
+    except Exception as e:
+        logger.error(f"Invalid payload, could not extract IMO: {e}")
+        return
     # 1. POST to /registration
     registration_url = f"{PTE_BASE_URL}/registration?api_key={PTE_API_KEY}&username={PTE_API_USERNAME}"
     registration_payload = {"registered_name": imo_number}
     transaction_id = None
     async with httpx.AsyncClient(timeout=30) as client:
         try:
+            logger.info(f"Registering vessel with payload: {registration_payload}")
             reg_resp = await client.post(registration_url, json=registration_payload)
             reg_resp.raise_for_status()
             reg_data = reg_resp.json()
             transaction_id = reg_data.get("transaction_id")
-        except Exception:
-            return  # Registration failed
+            logger.info(f"Registration successful, transaction_id: {transaction_id}")
+        except Exception as e:
+            logger.error(f"Registration failed: {e}")
+            return
     if not transaction_id:
+        logger.error("No transaction_id returned from registration. Skipping.")
         return
     # 2. Poll /transaction every 3s until screening_status != "PENDING"
     poll_url = f"{PTE_BASE_URL}/transaction?id={transaction_id}&api_key={PTE_API_KEY}&username={PTE_API_USERNAME}"
     screening_status = "PENDING"
     poll_resp_obj = None
-    for _ in range(40):  # ~2min max
+    for poll_count in range(40):  # ~2min max
         try:
             poll_resp = await client.get(poll_url)
             poll_resp.raise_for_status()
             poll_data = poll_resp.json()
             objects = poll_data.get("objects", [])
+            logger.info(f"Polling attempt {poll_count+1}: objects={bool(objects)}, screening_status={screening_status}")
             if objects:
                 poll_resp_obj = objects[0]
                 screening_status = poll_resp_obj.get("screening_status", "PENDING")
+                logger.info(f"Screening status: {screening_status}")
                 if screening_status != "PENDING":
                     break
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Polling error (attempt {poll_count+1}): {e}")
             await asyncio.sleep(3)
             continue
         await asyncio.sleep(3)
     if not poll_resp_obj or screening_status == "PENDING":
-        return  # Timed out or failed
+        logger.error("Polling timed out or failed to complete screening.")
+        return
     # 3. Extract screening results
     try:
         screen_results = poll_resp_obj.get("screen_results", [])
+        logger.info(f"Extracted screen_results: {screen_results}")
         def get_status(check):
             for sr in screen_results:
                 if sr.get("check") == check:
@@ -147,9 +163,11 @@ async def screen_vessel_and_update_notification(notification_data: Dict[str, Any
             "ship_movement": get_status("SHIP_MOVE_HIST"),
             "psc": get_status("PSC_HISTORY"),
         }
-        # 4. Update the notification document
-        collection.update_one({"_id": inserted_id}, {"$set": {"screening_results": screening_results}})
-    except Exception:
+        logger.info(f"Updating notification document {inserted_id} with screening_results: {screening_results}")
+        update_result = collection.update_one({"_id": inserted_id}, {"$set": {"screening_results": screening_results}})
+        logger.info(f"MongoDB update result: matched_count={update_result.matched_count}, modified_count={update_result.modified_count}")
+    except Exception as e:
+        logger.error(f"Exception during screening result extraction or MongoDB update: {e}", exc_info=True)
         return
 
 def get_vessel_notifications_collection():
