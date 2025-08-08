@@ -1,18 +1,131 @@
 import os
 import httpx
 import logging
+import asyncio
+import json
+import weakref
+import html
 from fastapi import APIRouter, HTTPException, Request, Body, Depends, Query, BackgroundTasks
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pymongo import MongoClient
 from dotenv import load_dotenv
 from datetime import datetime
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Set
 from pydantic import BaseModel
+from contextlib import asynccontextmanager
 
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
 
 logger = logging.getLogger("notifications")
+sse_logger = logging.getLogger("sse")
 logging.basicConfig(level=logging.INFO)
+
+# SSE Connection Management
+class SSEConnectionManager:
+    def __init__(self):
+        self.active_connections: Set[asyncio.Queue] = set()
+        self.connection_lock = asyncio.Lock()
+        self.max_connections = 100  # Limit concurrent connections
+        self.heartbeat_interval = 30  # seconds
+        self.connection_timeout = 300  # 5 minutes
+        
+    async def connect(self, websocket_queue: asyncio.Queue) -> bool:
+        """Add a new SSE connection"""
+        async with self.connection_lock:
+            if len(self.active_connections) >= self.max_connections:
+                sse_logger.warning(f"Connection limit reached ({self.max_connections}). Rejecting new connection.")
+                return False
+            
+            self.active_connections.add(websocket_queue)
+            sse_logger.info(f"New SSE connection established. Active connections: {len(self.active_connections)}")
+            return True
+    
+    async def disconnect(self, websocket_queue: asyncio.Queue):
+        """Remove an SSE connection"""
+        async with self.connection_lock:
+            self.active_connections.discard(websocket_queue)
+            sse_logger.info(f"SSE connection closed. Active connections: {len(self.active_connections)}")
+    
+    async def broadcast_notification(self, notification_data: Dict[str, Any]):
+        """Broadcast notification to all connected clients"""
+        if not self.active_connections:
+            sse_logger.debug("No active SSE connections to broadcast to")
+            return
+        
+        # Sanitize notification data to prevent XSS
+        sanitized_data = self._sanitize_notification(notification_data)
+        message = self._format_sse_message(sanitized_data)
+        
+        sse_logger.info(f"Broadcasting notification to {len(self.active_connections)} connections")
+        
+        # Create a copy of connections to avoid modification during iteration
+        connections_copy = list(self.active_connections)
+        
+        for connection_queue in connections_copy:
+            try:
+                # Use put_nowait to avoid blocking if queue is full
+                connection_queue.put_nowait(message)
+            except asyncio.QueueFull:
+                sse_logger.warning("Connection queue full, removing stale connection")
+                await self.disconnect(connection_queue)
+            except Exception as e:
+                sse_logger.error(f"Error broadcasting to connection: {e}")
+                await self.disconnect(connection_queue)
+    
+    def _sanitize_notification(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Sanitize notification data to prevent XSS attacks"""
+        def sanitize_value(value):
+            if isinstance(value, str):
+                return html.escape(value)
+            elif isinstance(value, dict):
+                return {k: sanitize_value(v) for k, v in value.items()}
+            elif isinstance(value, list):
+                return [sanitize_value(item) for item in value]
+            else:
+                return value
+        
+        return sanitize_value(data)
+    
+    def _format_sse_message(self, data: Dict[str, Any]) -> str:
+        """Format data as SSE message"""
+        try:
+            json_data = json.dumps(data, default=str)
+            return f"data: {json_data}\n\n"
+        except Exception as e:
+            sse_logger.error(f"Error formatting SSE message: {e}")
+            return "data: {\"error\": \"Failed to format notification\"}\n\n"
+    
+    async def send_heartbeat(self):
+        """Send heartbeat to all connections"""
+        if not self.active_connections:
+            return
+        
+        heartbeat_message = "data: {\"type\": \"heartbeat\", \"timestamp\": \"" + datetime.utcnow().isoformat() + "\"}\n\n"
+        
+        connections_copy = list(self.active_connections)
+        for connection_queue in connections_copy:
+            try:
+                connection_queue.put_nowait(heartbeat_message)
+            except (asyncio.QueueFull, Exception) as e:
+                sse_logger.warning(f"Heartbeat failed for connection: {e}")
+                await self.disconnect(connection_queue)
+
+# Global SSE manager instance
+sse_manager = SSEConnectionManager()
+
+# Background task for heartbeat
+async def heartbeat_task():
+    """Background task to send periodic heartbeats"""
+    while True:
+        try:
+            await asyncio.sleep(sse_manager.heartbeat_interval)
+            await sse_manager.send_heartbeat()
+        except Exception as e:
+            sse_logger.error(f"Heartbeat task error: {e}")
+            await asyncio.sleep(5)  # Brief pause before retrying
+
+# Start heartbeat task when module loads
+asyncio.create_task(heartbeat_task())
 
 async def check_user_logged_in(user_id: str = Query(..., description="User ID for authentication"), request: Request = None):
     """Dependency to check if user is logged in."""
@@ -87,6 +200,42 @@ def get_zone_port_notifications_collection():
     db = client[db_name]
     return db[collection_name]
 
+
+async def broadcast_notification_to_sse(notification_data: Dict[str, Any], inserted_id):
+    """Broadcast notification to SSE clients"""
+    try:
+        # Prepare notification for broadcasting
+        broadcast_data = {
+            "type": "zone_port_notification",
+            "notification_id": str(inserted_id),
+            "timestamp": datetime.utcnow().isoformat(),
+            "user_id": notification_data.get("user_id"),
+            "data": notification_data
+        }
+        
+        # Broadcast to all connected SSE clients
+        await sse_manager.broadcast_notification(broadcast_data)
+        sse_logger.info(f"Broadcasted notification {inserted_id} to SSE clients")
+        
+    except Exception as e:
+        sse_logger.error(f"Failed to broadcast notification {inserted_id}: {e}")
+
+async def screen_vessel_and_update_notification_with_broadcast(notification_data: Dict[str, Any], inserted_id, collection):
+    """Screen vessel and update notification, then broadcast to SSE clients"""
+    # First run the original screening function
+    await screen_vessel_and_update_notification(notification_data, inserted_id, collection)
+    
+    # After screening is complete, fetch the updated notification and broadcast it
+    try:
+        updated_notification = collection.find_one({"_id": inserted_id})
+        if updated_notification:
+            # Convert ObjectId to string for JSON serialization
+            updated_notification["_id"] = str(updated_notification["_id"])
+            await broadcast_notification_to_sse(updated_notification, inserted_id)
+        else:
+            logger.warning(f"Could not find updated notification {inserted_id} for broadcasting")
+    except Exception as e:
+        sse_logger.error(f"Failed to broadcast updated notification {inserted_id}: {e}")
 
 async def screen_vessel_and_update_notification(notification_data: Dict[str, Any], inserted_id, collection):
     import asyncio
@@ -222,11 +371,13 @@ async def handle_zone_port_webhook(notification_data: Dict[str, Any] = Body(...)
         if notification_data.get("auto_screen"):
             if background_tasks is not None:
                 logger.info(f"auto_screen is True, adding background screening task for _id: {result.inserted_id}")
-                background_tasks.add_task(screen_vessel_and_update_notification, notification_data, result.inserted_id, collection)
+                background_tasks.add_task(screen_vessel_and_update_notification_with_broadcast, notification_data, result.inserted_id, collection)
             else:
                 logger.warning("auto_screen is True but background_tasks is None; screening not started.")
         else:
             logger.info("auto_screen is False or not set; skipping background screening.")
+            # Broadcast notification immediately if no screening is needed
+            await broadcast_notification_to_sse(notification_data, result.inserted_id)
         return {
             "status": "success",
             "message": "Notification stored successfully",
@@ -340,3 +491,110 @@ async def get_vessel_notifications(
             status_code=500,
             detail=f"Failed to retrieve vessel notifications: {str(e)}"
         )
+
+
+@router.get("/zone-port-events/stream")
+async def zone_port_events_stream(
+    request: Request,
+    user_id: str = Query(..., description="User ID for authentication")
+):
+    """
+    Server-Sent Events (SSE) endpoint for real-time zone/port notifications.
+    
+    Clients should connect to this endpoint to receive real-time notifications.
+    The connection will send periodic heartbeats to keep the connection alive.
+    
+    Recommended client implementation:
+    - Use EventSource API in JavaScript
+    - Implement exponential backoff for reconnection (start with 1s, max 30s)
+    - Handle 'heartbeat' events to maintain connection
+    - Parse 'notification' events for actual data
+    
+    Example JavaScript client:
+    ```javascript
+    const eventSource = new EventSource('/notifications/zone-port-events/stream?user_id=your_user_id');
+    
+    eventSource.onmessage = function(event) {
+        const data = JSON.parse(event.data);
+        if (data.type === 'heartbeat') {
+            console.log('Heartbeat received');
+        } else {
+            console.log('Notification received:', data);
+            // Handle notification data
+        }
+    };
+    
+    eventSource.onerror = function(event) {
+        console.error('SSE error:', event);
+        // Implement exponential backoff reconnection
+    };
+    ```
+    """
+    # Validate user authentication
+    try:
+        await check_user_logged_in(user_id, request)
+    except HTTPException as e:
+        sse_logger.warning(f"SSE connection rejected for user {user_id}: {e.detail}")
+        raise e
+    
+    # Create a queue for this connection
+    connection_queue = asyncio.Queue(maxsize=50)  # Limit queue size to prevent memory issues
+    
+    # Try to register the connection
+    if not await sse_manager.connect(connection_queue):
+        raise HTTPException(
+            status_code=503,
+            detail="Server at capacity. Please try again later."
+        )
+    
+    async def event_generator():
+        """Generate SSE events for this connection"""
+        try:
+            sse_logger.info(f"Starting SSE stream for user {user_id}")
+            
+            # Send initial connection confirmation
+            initial_message = {
+                "type": "connection_established",
+                "user_id": user_id,
+                "timestamp": datetime.utcnow().isoformat(),
+                "message": "SSE connection established successfully"
+            }
+            yield f"data: {json.dumps(initial_message)}\n\n"
+            
+            # Main event loop
+            while True:
+                try:
+                    # Wait for messages with timeout
+                    message = await asyncio.wait_for(
+                        connection_queue.get(), 
+                        timeout=sse_manager.connection_timeout
+                    )
+                    yield message
+                    
+                except asyncio.TimeoutError:
+                    sse_logger.info(f"SSE connection timeout for user {user_id}")
+                    break
+                    
+                except asyncio.CancelledError:
+                    sse_logger.info(f"SSE connection cancelled for user {user_id}")
+                    break
+                    
+        except Exception as e:
+            sse_logger.error(f"SSE stream error for user {user_id}: {e}")
+        finally:
+            # Clean up connection
+            await sse_manager.disconnect(connection_queue)
+            sse_logger.info(f"SSE stream ended for user {user_id}")
+    
+    # Return streaming response with proper SSE headers
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Cache-Control",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+        }
+    )

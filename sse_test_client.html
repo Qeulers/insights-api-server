@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSE Notification Test Client</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .connected { background-color: #d4edda; color: #155724; }
+        .disconnected { background-color: #f8d7da; color: #721c24; }
+        .connecting { background-color: #fff3cd; color: #856404; }
+        .log {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 10px;
+            height: 400px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+            margin: 10px 0;
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        input, button {
+            padding: 8px 12px;
+            margin: 5px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+        .notification {
+            background: #e7f3ff;
+            border: 1px solid #b3d9ff;
+            border-radius: 4px;
+            padding: 10px;
+            margin: 5px 0;
+        }
+        .heartbeat {
+            color: #28a745;
+            font-size: 11px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>SSE Zone/Port Notifications Test Client</h1>
+        
+        <div class="controls">
+            <label for="userId">User ID:</label>
+            <input type="text" id="userId" placeholder="Enter your user ID" value="test_user_123">
+            
+            <label for="serverUrl">Server URL:</label>
+            <input type="text" id="serverUrl" placeholder="http://localhost:8000" value="http://localhost:8000">
+            
+            <button id="connectBtn" onclick="connect()">Connect</button>
+            <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+            <button onclick="clearLog()">Clear Log</button>
+        </div>
+        
+        <div id="status" class="status disconnected">Disconnected</div>
+        
+        <div class="log" id="log"></div>
+        
+        <div>
+            <h3>Connection Statistics</h3>
+            <p>Total Messages: <span id="messageCount">0</span></p>
+            <p>Heartbeats: <span id="heartbeatCount">0</span></p>
+            <p>Notifications: <span id="notificationCount">0</span></p>
+            <p>Connection Time: <span id="connectionTime">-</span></p>
+        </div>
+        
+        <div>
+            <h3>Instructions</h3>
+            <ol>
+                <li>Enter your User ID (the same one used in your application)</li>
+                <li>Verify the Server URL matches your FastAPI server</li>
+                <li>Click "Connect" to establish SSE connection</li>
+                <li>Trigger notifications through your application webhook</li>
+                <li>Watch real-time notifications appear in the log</li>
+            </ol>
+            
+            <h4>Expected Message Types:</h4>
+            <ul>
+                <li><strong>connection_established</strong>: Initial connection confirmation</li>
+                <li><strong>heartbeat</strong>: Periodic keep-alive messages (every 30 seconds)</li>
+                <li><strong>zone_port_notification</strong>: Actual notification data</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        let eventSource = null;
+        let connectTime = null;
+        let messageCount = 0;
+        let heartbeatCount = 0;
+        let notificationCount = 0;
+        let reconnectAttempts = 0;
+        let maxReconnectAttempts = 5;
+        let reconnectDelay = 1000; // Start with 1 second
+
+        function updateStatus(status, className) {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = status;
+            statusEl.className = `status ${className}`;
+        }
+
+        function log(message, type = 'info') {
+            const logEl = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            
+            if (type === 'heartbeat') {
+                logEntry.className = 'heartbeat';
+                logEntry.textContent = `[${timestamp}] ${message}`;
+            } else if (type === 'notification') {
+                logEntry.className = 'notification';
+                logEntry.innerHTML = `<strong>[${timestamp}] NOTIFICATION:</strong><br><pre>${message}</pre>`;
+            } else {
+                logEntry.textContent = `[${timestamp}] ${message}`;
+            }
+            
+            logEl.appendChild(logEntry);
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        function updateStats() {
+            document.getElementById('messageCount').textContent = messageCount;
+            document.getElementById('heartbeatCount').textContent = heartbeatCount;
+            document.getElementById('notificationCount').textContent = notificationCount;
+            
+            if (connectTime) {
+                const duration = Math.floor((Date.now() - connectTime) / 1000);
+                document.getElementById('connectionTime').textContent = `${duration}s`;
+            }
+        }
+
+        function connect() {
+            const userId = document.getElementById('userId').value.trim();
+            const serverUrl = document.getElementById('serverUrl').value.trim();
+            
+            if (!userId) {
+                alert('Please enter a User ID');
+                return;
+            }
+            
+            if (!serverUrl) {
+                alert('Please enter a Server URL');
+                return;
+            }
+
+            disconnect(); // Close any existing connection
+            
+            const url = `${serverUrl}/notifications/zone-port-events/stream?user_id=${encodeURIComponent(userId)}`;
+            
+            updateStatus('Connecting...', 'connecting');
+            log(`Connecting to: ${url}`);
+            
+            eventSource = new EventSource(url);
+            connectTime = Date.now();
+            
+            eventSource.onopen = function(event) {
+                updateStatus('Connected', 'connected');
+                log('SSE connection established successfully');
+                document.getElementById('connectBtn').disabled = true;
+                document.getElementById('disconnectBtn').disabled = false;
+                reconnectAttempts = 0;
+                reconnectDelay = 1000;
+            };
+            
+            eventSource.onmessage = function(event) {
+                messageCount++;
+                
+                try {
+                    const data = JSON.parse(event.data);
+                    
+                    if (data.type === 'heartbeat') {
+                        heartbeatCount++;
+                        log(`Heartbeat received - ${data.timestamp}`, 'heartbeat');
+                    } else if (data.type === 'connection_established') {
+                        log(`Connection established for user: ${data.user_id}`);
+                    } else if (data.type === 'zone_port_notification') {
+                        notificationCount++;
+                        log(JSON.stringify(data, null, 2), 'notification');
+                    } else {
+                        log(`Unknown message type: ${JSON.stringify(data, null, 2)}`);
+                    }
+                } catch (e) {
+                    log(`Failed to parse message: ${event.data}`);
+                }
+                
+                updateStats();
+            };
+            
+            eventSource.onerror = function(event) {
+                log('SSE connection error occurred');
+                updateStatus('Connection Error', 'disconnected');
+                
+                // Implement exponential backoff for reconnection
+                if (reconnectAttempts < maxReconnectAttempts) {
+                    reconnectAttempts++;
+                    const delay = Math.min(reconnectDelay * Math.pow(2, reconnectAttempts - 1), 30000);
+                    
+                    log(`Attempting reconnection ${reconnectAttempts}/${maxReconnectAttempts} in ${delay}ms`);
+                    
+                    setTimeout(() => {
+                        if (eventSource && eventSource.readyState === EventSource.CLOSED) {
+                            connect();
+                        }
+                    }, delay);
+                } else {
+                    log('Maximum reconnection attempts reached');
+                    disconnect();
+                }
+            };
+        }
+
+        function disconnect() {
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+            }
+            
+            updateStatus('Disconnected', 'disconnected');
+            log('SSE connection closed');
+            
+            document.getElementById('connectBtn').disabled = false;
+            document.getElementById('disconnectBtn').disabled = true;
+            
+            connectTime = null;
+            document.getElementById('connectionTime').textContent = '-';
+        }
+
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+            messageCount = 0;
+            heartbeatCount = 0;
+            notificationCount = 0;
+            updateStats();
+        }
+
+        // Update connection time every second
+        setInterval(updateStats, 1000);
+        
+        // Handle page unload
+        window.addEventListener('beforeunload', disconnect);
+    </script>
+</body>
+</html>
