@@ -439,8 +439,12 @@ async def get_zone_port_notifications(
         # Add timestamp filter if provided
         if created_at_start:
             try:
+                # Since created_at is stored as a string, we can do string comparison
+                # Ensure the input format matches the stored format
                 start_datetime = datetime.fromisoformat(created_at_start.replace('Z', '+00:00'))
-                query_filter["created_at"] = {"$gte": start_datetime}
+                # Convert back to the same string format as stored in the database
+                start_datetime_str = start_datetime.strftime('%Y-%m-%dT%H:%M:%SZ')
+                query_filter["created_at"] = {"$gte": start_datetime_str}
             except ValueError:
                 raise HTTPException(
                     status_code=400,
