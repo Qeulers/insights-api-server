@@ -425,7 +425,7 @@ class SubscriptionIDs(BaseModel):
 async def get_zone_port_notifications(
     user_id: str = Depends(check_user_logged_in),
     limit: int = Query(500, ge=1, le=1000, description="Maximum number of notifications to return"),
-    received_at_start: Optional[str] = Query(None, description="Filter notifications with created_at >= this UTC ISO timestamp")
+    created_at_start: Optional[str] = Query(None, description="Filter notifications with created_at >= this UTC ISO timestamp")
 ):
     """
     Retrieve all zone/port notifications for the user with the given user_id.
@@ -437,14 +437,14 @@ async def get_zone_port_notifications(
         query_filter = {"user_id": user_id}
         
         # Add timestamp filter if provided
-        if received_at_start:
+        if created_at_start:
             try:
-                start_datetime = datetime.fromisoformat(received_at_start.replace('Z', '+00:00'))
+                start_datetime = datetime.fromisoformat(created_at_start.replace('Z', '+00:00'))
                 query_filter["created_at"] = {"$gte": start_datetime}
             except ValueError:
                 raise HTTPException(
                     status_code=400,
-                    detail="Invalid received_at_start format. Expected UTC ISO timestamp (e.g., '2023-01-01T00:00:00Z')"
+                    detail="Invalid created_at_start format. Expected UTC ISO timestamp (e.g., '2023-01-01T00:00:00Z')"
                 )
         
         # Query for documents with the built filter
