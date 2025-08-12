@@ -448,7 +448,7 @@ async def get_zone_port_notifications(
                 )
         
         # Query for documents with the built filter
-        cursor = collection.find(query_filter).sort("received_at", -1).limit(limit)
+        cursor = collection.find(query_filter).sort("created_at", -1).limit(limit)
         
         # Convert cursor to list and format the response
         notifications = []
