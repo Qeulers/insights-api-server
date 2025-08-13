@@ -387,14 +387,21 @@ async def handle_zone_port_webhook(notification_data: Dict[str, Any] = Body(...)
         result = collection.insert_one(notification_data)
         logger.info(f"Inserted notification with _id: {result.inserted_id}")
         # Launch screening in background if auto_screen is true
-        if notification_data.get("auto_screen"):
+        # But ignore auto_screen for Tug and Push-boat vessel types
+        vessel_type = notification_data.get("notification", {}).get("vessel_information", {}).get("vessel_type")
+        should_skip_screening = vessel_type in ["Tug", "Push-boat"]
+        
+        if notification_data.get("auto_screen") and not should_skip_screening:
             if background_tasks is not None:
                 logger.info(f"auto_screen is True, adding background screening task for _id: {result.inserted_id}")
                 background_tasks.add_task(screen_vessel_and_update_notification_with_broadcast, notification_data, result.inserted_id, collection)
             else:
                 logger.warning("auto_screen is True but background_tasks is None; screening not started.")
         else:
-            logger.info("auto_screen is False or not set; skipping background screening.")
+            if should_skip_screening:
+                logger.info(f"Skipping auto screening for vessel type '{vessel_type}' (Tug/Push-boat vessels are never screened)")
+            else:
+                logger.info("auto_screen is False or not set; skipping background screening.")
             # Broadcast notification immediately if no screening is needed
             await broadcast_notification_to_sse(notification_data, result.inserted_id)
         return {
