@@ -280,13 +280,32 @@ async def screen_vessel_and_update_notification(notification_data: Dict[str, Any
         screening_status = "PENDING"
         poll_resp_obj = None
         logger.info(f"[screening] Polling for screening results at: {poll_url}")
-        for poll_count in range(40):  # ~2min max
+        
+        # Graduated polling intervals over 5 minutes:
+        # First minute: 3 seconds (20 attempts)
+        # Second minute: 5 seconds (12 attempts) 
+        # Remaining 3 minutes: 10 seconds (18 attempts)
+        # Total: 50 attempts over 5 minutes
+        total_attempts = 50
+        
+        for poll_count in range(total_attempts):
+            # Determine polling interval based on attempt number
+            if poll_count < 20:  # First minute: 3 second intervals
+                poll_interval = 3
+                phase = "first minute"
+            elif poll_count < 32:  # Second minute: 5 second intervals
+                poll_interval = 5
+                phase = "second minute"
+            else:  # Remaining time: 10 second intervals
+                poll_interval = 10
+                phase = "remaining duration"
+                
             try:
                 poll_resp = await client.get(poll_url)
                 poll_resp.raise_for_status()
                 poll_data = poll_resp.json()
                 objects = poll_data.get("objects", [])
-                logger.info(f"[screening] Polling attempt {poll_count+1}: objects={bool(objects)}, screening_status={screening_status}")
+                logger.info(f"[screening] Polling attempt {poll_count+1}/{total_attempts} ({phase}): objects={bool(objects)}, screening_status={screening_status}")
                 if objects:
                     poll_resp_obj = objects[0]
                     screening_status = poll_resp_obj.get("screening_status", "PENDING")
@@ -294,10 +313,10 @@ async def screen_vessel_and_update_notification(notification_data: Dict[str, Any
                     if screening_status != "PENDING":
                         break
             except Exception as e:
-                logger.warning(f"[screening] Polling error (attempt {poll_count+1}): {e}")
-                await asyncio.sleep(3)
+                logger.warning(f"[screening] Polling error (attempt {poll_count+1}/{total_attempts}): {e}")
+                await asyncio.sleep(poll_interval)
                 continue
-            await asyncio.sleep(3)
+            await asyncio.sleep(poll_interval)
         if not poll_resp_obj or screening_status == "PENDING":
             logger.error("[screening] Polling timed out or failed to complete screening.")
             return
